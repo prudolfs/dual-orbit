@@ -1,0 +1,75 @@
+{
+	"$schema": "https://biomejs.dev/schemas/2.4.16/schema.json",
+	"vcs": {
+		"enabled": true,
+		"clientKind": "git",
+		"useIgnoreFile": true
+	},
+	"files": {
+		"ignoreUnknown": false,
+		"includes": [
+			"src/**",
+			"!**/node_modules",
+			"!**/public",
+			"!**/dist",
+			"!**/build"
+		]
+	},
+	"formatter": {
+		"enabled": true,
+		"indentStyle": "tab"
+	},
+	"linter": {
+		"enabled": true,
+		"rules": {
+			"recommended": true,
+			"complexity": {
+				"noUselessTypeConstraint": "error",
+				"noUselessFragments": "error"
+			},
+			"correctness": {
+				"noUnusedVariables": "error",
+				"noUnusedImports": "error",
+				"useExhaustiveDependencies": "warn",
+				"useHookAtTopLevel": "error"
+			},
+			"style": {
+				"useConst": "error",
+				"useSelfClosingElements": "error",
+				"useTemplate": "error",
+				"noNonNullAssertion": "warn",
+				"useImportType": "error"
+			},
+			"nursery": {
+				"useSortedClasses": "error"
+			},
+			"suspicious": {
+				"noVar": "error",
+				"noExplicitAny": "warn",
+				"noArrayIndexKey": "warn",
+				"noConsole": "warn",
+				"noDoubleEquals": "error"
+			}
+		}
+	},
+	"css": {
+		"parser": {
+			"cssModules": true,
+			"tailwindDirectives": true
+		}
+	},
+	"javascript": {
+		"formatter": {
+			"quoteStyle": "single",
+			"semicolons": "asNeeded"
+		}
+	},
+	"assist": {
+		"enabled": true,
+		"actions": {
+			"source": {
+				"organizeImports": "on"
+			}
+		}
+	}
+}
