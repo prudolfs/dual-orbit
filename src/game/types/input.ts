@@ -22,3 +22,10 @@ export function inputToDirection(input: SimulationInput): DirectionState {
 
 	return 0
 }
+
+export function directionToInput(direction: DirectionState): SimulationInput {
+	return {
+		left: direction === -1,
+		right: direction === 1,
+	}
+}

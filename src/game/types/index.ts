@@ -6,7 +6,7 @@ export type {
 	WaveState,
 } from './generator'
 export type { DirectionMemento, DirectionState, SimulationInput } from './input'
-export { inputToDirection } from './input'
+export { directionToInput, inputToDirection } from './input'
 export type {
 	AngularLongObstacleState,
 	AngularObstacleState,

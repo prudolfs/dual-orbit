@@ -1,4 +1,5 @@
 import {
+	DEFAULT_RESOLUTION,
 	ORB_ANGULAR_SPEED,
 	ORB_DIAMETER,
 	ORBIT_DIAMETER,
@@ -17,6 +18,7 @@ import type {
 	SimulationInput,
 	Vec2,
 } from '../../types'
+import { directionToInput, inputToDirection } from '../../types'
 
 export type CreateOrbitOptions = {
 	readonly resolution?: keyof typeof ORIGINAL_SCALE
@@ -24,7 +26,7 @@ export type CreateOrbitOptions = {
 }
 
 export function createOrbitState(options: CreateOrbitOptions = {}): OrbitState {
-	const resolution = options.resolution ?? 'xd'
+	const resolution = options.resolution ?? DEFAULT_RESOLUTION
 	const scale = ORIGINAL_SCALE[resolution]
 	const area = ORIGINAL_AREA[resolution]
 	const radius = Math.round((ORBIT_DIAMETER * scale) / 2)
@@ -95,8 +97,14 @@ export function updateOrbit(
 	input: SimulationInput,
 	scale = 1,
 ): OrbitState {
-	const direction = input.left ? -1 : input.right ? 1 : 0
+	return updateOrbitByDirection(orbit, inputToDirection(input), scale)
+}
 
+export function updateOrbitByDirection(
+	orbit: OrbitState,
+	direction: DirectionState,
+	scale = 1,
+): OrbitState {
 	if (direction === 0) {
 		return orbit
 	}
@@ -110,6 +118,61 @@ export function updateOrbit(
 			rotateOrb(orbit.orbs[1], deltaAngle, orbit.radius),
 		],
 	}
+}
+
+export function updateOrbitLeft(orbit: OrbitState, scale = 1): OrbitState {
+	return updateOrbitByDirection(orbit, -1, scale)
+}
+
+export function updateOrbitRight(orbit: OrbitState, scale = 1): OrbitState {
+	return updateOrbitByDirection(orbit, 1, scale)
+}
+
+export function getOrbWorldPosition(
+	orbit: OrbitState,
+	side: OrbState['side'],
+): Vec2 {
+	const orb = orbit.orbs.find((candidate) => candidate.side === side)
+
+	if (!orb) {
+		return orbit.center
+	}
+
+	return {
+		x: orbit.center.x + orb.localPosition.x,
+		y: orbit.center.y + orb.localPosition.y,
+	}
+}
+
+export type OrbitRhythmSample = {
+	readonly tick: number
+	readonly leftAngle: number
+	readonly rightAngle: number
+	readonly leftPosition: Vec2
+	readonly rightPosition: Vec2
+}
+
+export function sampleOrbitRhythm(
+	ticks: number,
+	direction: DirectionState,
+	initialOrbit: OrbitState = createOrbitState(),
+): readonly OrbitRhythmSample[] {
+	const input = directionToInput(direction)
+	const samples: OrbitRhythmSample[] = []
+	let orbit = initialOrbit
+
+	for (let tick = 1; tick <= ticks; tick++) {
+		orbit = updateOrbit(orbit, input)
+		samples.push({
+			tick,
+			leftAngle: orbit.orbs[0].angle,
+			rightAngle: orbit.orbs[1].angle,
+			leftPosition: getOrbWorldPosition(orbit, 'left'),
+			rightPosition: getOrbWorldPosition(orbit, 'right'),
+		})
+	}
+
+	return samples
 }
 
 export function moveOrbitVertically(

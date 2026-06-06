@@ -10,7 +10,7 @@ export const ORIGINAL_SCALE = {
 	ld: 0.25,
 } as const
 
-export const DEFAULT_RESOLUTION: keyof typeof ORIGINAL_SCALE = 'xd'
+export const DEFAULT_RESOLUTION: keyof typeof ORIGINAL_SCALE = 'sd'
 export const DEFAULT_LEVELS_PER_GROUP = 25
 export const DEFAULT_GROUPS = 6
 

@@ -14,13 +14,18 @@ export {
 } from './obstacles'
 export {
 	createOrbitState,
+	getOrbWorldPosition,
 	getStabilizeDirection,
 	isOrbitStable,
 	moveOrbitVertically,
 	positionOnOrbit,
 	rotateOrb,
+	sampleOrbitRhythm,
 	setOrbitRollbackTicks,
 	updateOrbit,
+	updateOrbitByDirection,
+	updateOrbitLeft,
+	updateOrbitRight,
 } from './orbit'
 export {
 	createDirectionMemento,

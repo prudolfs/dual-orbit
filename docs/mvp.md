@@ -339,7 +339,7 @@ Collision parity with Phaser.
 
 ---
 
-# Phase 4 — Orbit Mechanics
+# Phase 4 — Orbit Mechanics (done)
 
 ## Goal
 
