@@ -215,7 +215,7 @@ Simulation architecture document.
 
 ---
 
-# Phase 1 — Simulation Core
+# Phase 1 — Simulation Core (done)
 
 ## Goal
 
