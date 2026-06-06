@@ -116,6 +116,61 @@ export function markCollision(
 	}
 }
 
+export function restoreObstaclesForRollback(
+	obstacles: readonly ObstacleState[],
+): readonly ObstacleState[] {
+	return obstacles.map((obstacle) => ({
+		...obstacle,
+		alive: true,
+		exists: true,
+		shrunken: false,
+		collidingOrbSides: [],
+	}))
+}
+
+export function hideRewindObstacles(
+	obstacles: readonly ObstacleState[],
+	indices: readonly number[],
+): readonly ObstacleState[] {
+	const indexSet = new Set(indices)
+
+	return obstacles.map((obstacle, index) =>
+		indexSet.has(index)
+			? {
+					...obstacle,
+					alive: false,
+					collidingOrbSides: [],
+				}
+			: obstacle,
+	)
+}
+
+export function getRewindObstacleIndices(
+	obstacles: readonly ObstacleState[],
+	collisionIndex: number,
+	quantity: number,
+): readonly number[] {
+	const indices: number[] = []
+	let index = collisionIndex - 1
+
+	while (index >= 0 && indices.length !== quantity) {
+		indices.push(index)
+		index--
+	}
+
+	const lastIndex = indices[indices.length - 1]
+
+	if (
+		index >= 0 &&
+		lastIndex !== undefined &&
+		obstacles[index]?.position.y === obstacles[lastIndex]?.position.y
+	) {
+		indices.push(index)
+	}
+
+	return indices
+}
+
 function setOrbCollisionFlags(
 	orbit: OrbitState,
 	collidingSides: readonly OrbState['side'][],

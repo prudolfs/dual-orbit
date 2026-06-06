@@ -3,13 +3,18 @@ export {
 	advanceFixedSimulation,
 	createInitialSimulation,
 	runSimulationTicks,
+	startRewind,
+	startRollback,
 	tickSimulation,
 } from './core'
 export { createGeneratorState } from './generator'
 export {
 	checkObstacleCollisions,
 	createObstacleState,
+	getRewindObstacleIndices,
+	hideRewindObstacles,
 	markCollision,
+	restoreObstaclesForRollback,
 	updateObstacles,
 } from './obstacles'
 export {
