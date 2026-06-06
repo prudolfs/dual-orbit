@@ -1,5 +1,5 @@
 import type { GeneratorState, SimulationState } from '../../types'
-import { createGeneratorState } from '../generator'
+import { createGeneratorState, generateObstacleLayout } from '../generator'
 import { createOrbitState } from '../orbit'
 import { createRewindState } from '../rewind'
 
@@ -12,17 +12,18 @@ export function createInitialSimulation(
 ): SimulationState {
 	const generator = createGeneratorState(options.generator)
 	const orbit = createOrbitState({ resolution: generator.resolution })
+	const layout = generateObstacleLayout(generator, orbit)
 
 	return {
 		mode: 'running',
 		tick: 0,
 		input: { left: false, right: false },
 		orbit,
-		obstacles: [],
-		generator,
+		obstacles: layout.obstacles,
+		generator: layout.generator,
 		rewind: createRewindState(orbit.center.y),
 		stats: {
-			obstacles: 0,
+			obstacles: layout.obstacles.length,
 			encounters: 0,
 			score: 0,
 			collisions: {

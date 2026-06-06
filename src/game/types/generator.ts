@@ -35,7 +35,7 @@ export type ObstacleArchetype = {
 	readonly mirror: string | readonly string[]
 	readonly width: number
 	readonly height: number
-	readonly offsetX: number | readonly number[]
+	readonly offsetX: number
 	readonly offsetTop: number
 	readonly offsetBottom: number
 	readonly speed: number

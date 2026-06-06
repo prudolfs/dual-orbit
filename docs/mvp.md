@@ -394,7 +394,7 @@ Rewind behaves identically to Phaser version.
 
 ---
 
-# Phase 6 — Generator Port
+# Phase 6 — Generator Port (done)
 
 ## Goal
 

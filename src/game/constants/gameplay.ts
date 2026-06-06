@@ -11,7 +11,7 @@ export const ORIGINAL_SCALE = {
 } as const
 
 export const DEFAULT_RESOLUTION: keyof typeof ORIGINAL_SCALE = 'sd'
-export const DEFAULT_LEVELS_PER_GROUP = 25
+export const DEFAULT_LEVELS_PER_GROUP = 8
 export const DEFAULT_GROUPS = 6
 
 export const ORBIT_DIAMETER = 640
