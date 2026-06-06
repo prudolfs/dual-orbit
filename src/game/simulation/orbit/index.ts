@@ -4,6 +4,9 @@ export {
 	createOrbState,
 	getStabilizeDirection,
 	isOrbitStable,
+	moveOrbitVertically,
 	positionOnOrbit,
 	rotateOrb,
+	setOrbitRollbackTicks,
+	updateOrbit,
 } from './orbit'

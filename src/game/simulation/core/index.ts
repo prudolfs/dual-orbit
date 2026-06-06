@@ -1,2 +1,6 @@
+export type { ConsoleSimulationSample } from './console'
+export { runSimulationTicks } from './console'
 export type { CreateSimulationOptions } from './create-simulation'
 export { createInitialSimulation } from './create-simulation'
+export type { FixedTimestepState, TickSimulationOptions } from './tick'
+export { advanceFixedSimulation, tickSimulation } from './tick'

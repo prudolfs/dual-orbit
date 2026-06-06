@@ -10,7 +10,13 @@ import {
 	ROLLBACK_SPEED,
 } from '../../constants'
 import { normalizeAngle } from '../../math'
-import type { DirectionState, OrbitState, OrbState, Vec2 } from '../../types'
+import type {
+	DirectionState,
+	OrbitState,
+	OrbState,
+	SimulationInput,
+	Vec2,
+} from '../../types'
 
 export type CreateOrbitOptions = {
 	readonly resolution?: keyof typeof ORIGINAL_SCALE
@@ -81,6 +87,50 @@ export function rotateOrb(
 		...orb,
 		angle,
 		localPosition: positionOnOrbit(angle, orbitRadius),
+	}
+}
+
+export function updateOrbit(
+	orbit: OrbitState,
+	input: SimulationInput,
+	scale = 1,
+): OrbitState {
+	const direction = input.left ? -1 : input.right ? 1 : 0
+
+	if (direction === 0) {
+		return orbit
+	}
+
+	const deltaAngle = orbit.angularSpeed * direction * scale
+
+	return {
+		...orbit,
+		orbs: [
+			rotateOrb(orbit.orbs[0], deltaAngle, orbit.radius),
+			rotateOrb(orbit.orbs[1], deltaAngle, orbit.radius),
+		],
+	}
+}
+
+export function moveOrbitVertically(
+	orbit: OrbitState,
+	direction: 1 | -1,
+): OrbitState {
+	const y = orbit.center.y - orbit.verticalSpeed * direction
+
+	return {
+		...orbit,
+		center: { ...orbit.center, y },
+	}
+}
+
+export function setOrbitRollbackTicks(
+	orbit: OrbitState,
+	rollbackTicks: number,
+): OrbitState {
+	return {
+		...orbit,
+		rollbackTicks,
 	}
 }
 

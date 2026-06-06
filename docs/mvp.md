@@ -275,7 +275,7 @@ Simulation runs entirely in TypeScript.
 
 ---
 
-# Phase 2 — Deterministic Update Loop
+# Phase 2 — Deterministic Update Loop (done)
 
 ## Goal
 

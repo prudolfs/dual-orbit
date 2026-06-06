@@ -24,3 +24,6 @@ export const REWIND_RESET_SPEED = 2
 export const ROLLBACK_SPEED = 4
 
 export const DEFAULT_RANDOM_SEED = 1
+
+export const FIXED_TIMESTEP_HZ = 60
+export const FIXED_TIMESTEP_MS = 1000 / FIXED_TIMESTEP_HZ

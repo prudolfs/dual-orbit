@@ -1,2 +1,2 @@
 export type { CreateObstacleStateOptions } from './obstacles'
-export { createObstacleState } from './obstacles'
+export { createObstacleState, updateObstacles } from './obstacles'
