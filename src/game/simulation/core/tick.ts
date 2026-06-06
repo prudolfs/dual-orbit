@@ -1,6 +1,10 @@
 import { FIXED_TIMESTEP_MS } from '../../constants'
 import type { SimulationInput, SimulationState } from '../../types'
-import { updateObstacles } from '../obstacles'
+import {
+	checkObstacleCollisions,
+	markCollision,
+	updateObstacles,
+} from '../obstacles'
 import {
 	moveOrbitVertically,
 	setOrbitRollbackTicks,
@@ -31,12 +35,23 @@ export function tickSimulation(
 		}
 	}
 
+	const collision = checkObstacleCollisions(state.obstacles, state.orbit)
+	const collisionState = markCollision(state.obstacles, state.orbit, collision)
+	const collisionStats = collision
+		? {
+				...state.stats,
+				collisions: {
+					...state.stats.collisions,
+					total: state.stats.collisions.total + 1,
+				},
+			}
+		: state.stats
 	const rewind = recordDirectionMemory(state.rewind, input)
 	const orbitWithTicks = setOrbitRollbackTicks(
-		state.orbit,
+		collisionState.orbit,
 		rewind.rollbackTicks,
 	)
-	const obstacles = updateObstacles(state.obstacles, orbitWithTicks, 1)
+	const obstacles = updateObstacles(collisionState.obstacles, orbitWithTicks, 1)
 	const rotatedOrbit = updateOrbit(orbitWithTicks, input)
 	const orbit = moveOrbitVertically(rotatedOrbit, 1)
 
@@ -47,7 +62,10 @@ export function tickSimulation(
 		orbit,
 		obstacles,
 		rewind,
-		stats: updateProgressionStats(state, obstacles),
+		stats: updateProgressionStats(
+			{ ...state, stats: collisionStats },
+			obstacles,
+		),
 	}
 }
 

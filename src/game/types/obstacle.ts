@@ -14,6 +14,7 @@ type ObstacleBase = {
 	readonly alive: boolean
 	readonly exists: boolean
 	readonly shrunken: boolean
+	readonly collidingOrbSides: readonly ('left' | 'right')[]
 }
 
 export type StaticObstacleState = ObstacleBase & {

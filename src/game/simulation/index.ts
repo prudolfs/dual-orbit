@@ -6,7 +6,12 @@ export {
 	tickSimulation,
 } from './core'
 export { createGeneratorState } from './generator'
-export { createObstacleState, updateObstacles } from './obstacles'
+export {
+	checkObstacleCollisions,
+	createObstacleState,
+	markCollision,
+	updateObstacles,
+} from './obstacles'
 export {
 	createOrbitState,
 	getStabilizeDirection,

@@ -1,5 +1,11 @@
-import { lerp, normalize } from '../../math'
-import type { ObstacleKind, ObstacleState, OrbitState, Vec2 } from '../../types'
+import { circleVsRect, circleVsRotatedRect, lerp, normalize } from '../../math'
+import type {
+	ObstacleKind,
+	ObstacleState,
+	OrbitState,
+	OrbState,
+	Vec2,
+} from '../../types'
 
 export type CreateObstacleStateOptions = {
 	readonly id: string
@@ -32,7 +38,98 @@ export function createObstacleState(
 		alive: options.alive ?? true,
 		exists: options.exists ?? true,
 		shrunken: options.shrunken ?? false,
+		collidingOrbSides: [],
 	}
+}
+
+export type CollisionResult = {
+	readonly obstacle: ObstacleState
+	readonly obstacleIndex: number
+	readonly orbSides: readonly OrbState['side'][]
+}
+
+export function checkObstacleCollisions(
+	obstacles: readonly ObstacleState[],
+	orbit: OrbitState,
+): CollisionResult | null {
+	for (
+		let obstacleIndex = 0;
+		obstacleIndex < obstacles.length;
+		obstacleIndex++
+	) {
+		const obstacle = obstacles[obstacleIndex]
+
+		if (!obstacle.exists || !obstacle.alive) {
+			continue
+		}
+
+		const orbSides = orbit.orbs
+			.filter((orb) => collideOrbWithObstacle(orbit, orb, obstacle))
+			.map((orb) => orb.side)
+
+		if (orbSides.length > 0) {
+			return {
+				obstacle: {
+					...obstacle,
+					collidingOrbSides: orbSides,
+				},
+				obstacleIndex,
+				orbSides,
+			}
+		}
+	}
+
+	return null
+}
+
+export function markCollision(
+	obstacles: readonly ObstacleState[],
+	orbit: OrbitState,
+	collision: CollisionResult | null,
+): {
+	readonly obstacles: readonly ObstacleState[]
+	readonly orbit: OrbitState
+} {
+	if (!collision) {
+		return {
+			obstacles: obstacles.map((obstacle) => ({
+				...obstacle,
+				collidingOrbSides: [],
+			})),
+			orbit: {
+				...orbit,
+				orbs: setOrbCollisionFlags(orbit, []),
+			},
+		}
+	}
+
+	return {
+		obstacles: obstacles.map((obstacle, index) =>
+			index === collision.obstacleIndex
+				? collision.obstacle
+				: { ...obstacle, collidingOrbSides: [] },
+		),
+		orbit: {
+			...orbit,
+			orbs: setOrbCollisionFlags(orbit, collision.orbSides),
+		},
+	}
+}
+
+function setOrbCollisionFlags(
+	orbit: OrbitState,
+	collidingSides: readonly OrbState['side'][],
+): OrbitState['orbs'] {
+	return [
+		{
+			...orbit.orbs[0],
+			colliding: collidingSides.includes(orbit.orbs[0].side),
+		},
+		{
+			...orbit.orbs[1],
+			colliding: collidingSides.includes(orbit.orbs[1].side),
+		},
+	]
 }
 
 export function updateObstacles(
@@ -87,4 +184,33 @@ function updateMovingObstacle(
 		...obstacle,
 		position: { ...obstacle.position, y },
 	}
+}
+
+function collideOrbWithObstacle(
+	orbit: OrbitState,
+	orb: OrbState,
+	obstacle: ObstacleState,
+): boolean {
+	const center = {
+		x: orbit.center.x + orb.localPosition.x,
+		y: orbit.center.y + orb.localPosition.y,
+	}
+
+	if (obstacle.kind === 'angular' || obstacle.kind === 'angular_long') {
+		return circleVsRotatedRect(
+			center,
+			orb.radius,
+			obstacle.position,
+			obstacle.width,
+			obstacle.height,
+			-obstacle.rotation,
+		)
+	}
+
+	return circleVsRect(center, orb.radius, {
+		left: obstacle.position.x - obstacle.width / 2,
+		top: obstacle.position.y - obstacle.height / 2,
+		right: obstacle.position.x + obstacle.width / 2,
+		bottom: obstacle.position.y + obstacle.height / 2,
+	})
 }

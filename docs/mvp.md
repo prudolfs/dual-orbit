@@ -309,7 +309,7 @@ Simulation can run in console tests.
 
 ---
 
-# Phase 3 — Collision System
+# Phase 3 — Collision System (done)
 
 ## Goal
 
