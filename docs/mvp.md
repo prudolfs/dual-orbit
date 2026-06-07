@@ -422,7 +422,7 @@ Generated obstacle layouts match original progression.
 
 ---
 
-# Phase 7 — R3F Visualization
+# Phase 7 — R3F Visualization (done)
 
 ## Goal
 
