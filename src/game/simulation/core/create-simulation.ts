@@ -30,6 +30,7 @@ export function createInitialSimulation(
 				total: 0,
 				safe: 0,
 			},
+			rewinds: 0,
 		},
 	}
 }

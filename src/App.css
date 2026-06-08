@@ -29,6 +29,49 @@
 	pointer-events: none;
 }
 
+.actions {
+	position: absolute;
+	right: 18px;
+	bottom: 18px;
+	display: flex;
+	gap: 8px;
+}
+
+.actions button,
+.start-overlay button {
+	height: 42px;
+	padding: 0 18px;
+	border: 1px solid rgba(32, 36, 45, 0.2);
+	border-radius: 8px;
+	background: #20242d;
+	color: #ffffff;
+	font: inherit;
+	font-size: 14px;
+	font-weight: 800;
+	cursor: pointer;
+	box-shadow: 0 8px 24px rgba(32, 36, 45, 0.16);
+}
+
+.actions button:hover,
+.start-overlay button:hover {
+	background: #303846;
+}
+
+.start-overlay {
+	position: absolute;
+	inset: 0;
+	display: grid;
+	place-items: center;
+	background: rgba(246, 247, 242, 0.5);
+	backdrop-filter: blur(2px);
+}
+
+.start-overlay button {
+	height: 52px;
+	min-width: 132px;
+	font-size: 16px;
+}
+
 .hud div {
 	display: grid;
 	grid-template-columns: 1fr;
@@ -79,5 +122,16 @@
 
 	.hud strong {
 		font-size: 15px;
+	}
+
+	.actions {
+		right: 10px;
+		bottom: 10px;
+	}
+
+	.actions button {
+		height: 38px;
+		padding: 0 14px;
+		font-size: 13px;
 	}
 }

@@ -21,6 +21,7 @@ export type SimulationStats = {
 		readonly total: number
 		readonly safe: number
 	}
+	readonly rewinds: number
 }
 
 export type SimulationState = {

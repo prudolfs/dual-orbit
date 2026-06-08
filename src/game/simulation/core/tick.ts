@@ -16,6 +16,7 @@ import {
 	updateOrbit,
 	updateOrbitByDirection,
 } from '../orbit'
+import { continueEndlessProgression } from '../progression'
 import { createInitialDirectionMemory, recordDirectionMemory } from '../rewind'
 
 export type TickSimulationOptions = {
@@ -106,6 +107,14 @@ export function startRewind(
 			rewindSpeed,
 			rewindTargetY,
 		},
+		stats: {
+			...state.stats,
+			collisions: {
+				...state.stats.collisions,
+				safe: state.stats.collisions.safe + 1,
+			},
+			rewinds: state.stats.rewinds + 1,
+		},
 	}
 }
 
@@ -152,8 +161,7 @@ function tickRunning(
 	const obstacles = updateObstacles(collisionState.obstacles, orbitWithTicks, 1)
 	const rotatedOrbit = updateOrbit(orbitWithTicks, input)
 	const orbit = moveOrbitVertically(rotatedOrbit, 1)
-
-	return {
+	const progressedState = continueEndlessProgression({
 		...state,
 		tick: state.tick + 1,
 		input,
@@ -161,10 +169,12 @@ function tickRunning(
 		obstacles,
 		rewind,
 		stats: updateProgressionStats(
-			{ ...state, stats: collisionStats },
+			{ ...state, stats: collisionStats, orbit },
 			obstacles,
 		),
-	}
+	})
+
+	return progressedState
 }
 
 function tickRewind(state: SimulationState): SimulationState {

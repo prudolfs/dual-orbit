@@ -11,10 +11,16 @@ import './App.css'
 
 function App() {
 	const [simulation, setSimulation] = useState<SimulationState>(() =>
-		createInitialSimulation(),
+		createMenuSimulation(),
 	)
 	const accumulatorRef = useRef(0)
 	const inputRef = useKeyboardInput()
+	const hasStarted = simulation.tick > 0 || simulation.mode !== 'paused'
+
+	function startGame() {
+		accumulatorRef.current = 0
+		setSimulation(createInitialSimulation())
+	}
 
 	return (
 		<main className="game-shell">
@@ -41,17 +47,42 @@ function App() {
 						<strong>{simulation.stats.score}</strong>
 					</div>
 					<div>
-						<span>Mode</span>
-						<strong>{simulation.mode}</strong>
+						<span>Collisions</span>
+						<strong>{simulation.stats.collisions.total}</strong>
 					</div>
 					<div>
-						<span>Obstacles</span>
-						<strong>{simulation.stats.obstacles}</strong>
+						<span>Rewinds</span>
+						<strong>{simulation.stats.rewinds}</strong>
+					</div>
+					<div>
+						<span>Checkpoint</span>
+						<strong>
+							{simulation.generator.group}.{simulation.generator.levelPerGroup}
+						</strong>
 					</div>
 				</div>
+				<div className="actions">
+					<button type="button" onClick={startGame}>
+						{hasStarted ? 'Restart' : 'Start'}
+					</button>
+				</div>
+				{simulation.mode === 'paused' ? (
+					<div className="start-overlay">
+						<button type="button" onClick={startGame}>
+							Start
+						</button>
+					</div>
+				) : null}
 			</section>
 		</main>
 	)
+}
+
+function createMenuSimulation(): SimulationState {
+	return {
+		...createInitialSimulation(),
+		mode: 'paused',
+	}
 }
 
 type SimulationTickerProps = {
@@ -72,6 +103,7 @@ function SimulationTicker({
 		onSimulationChange((current) => {
 			const fixed = advanceFixedSimulation(current, delta * 1000, {
 				accumulatorMs: accumulatorRef.current,
+				collisionAction: 'rewind',
 				input: inputRef.current,
 			})
 			accumulatorRef.current = fixed.accumulatorMs

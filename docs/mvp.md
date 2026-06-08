@@ -478,7 +478,7 @@ Input drives simulation.
 
 ---
 
-# Phase 9 — MVP Gameplay Loop
+# Phase 9 — MVP Gameplay Loop (done)
 
 ## Goal
 
