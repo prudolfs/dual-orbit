@@ -455,7 +455,7 @@ Entire game playable in 3D primitives.
 
 ---
 
-# Phase 8 — Input Layer
+# Phase 8 — Input Layer (done)
 
 ## Goal
 

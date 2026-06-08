@@ -5,6 +5,7 @@ import {
 	createInitialSimulation,
 } from './game/simulation'
 import type { SimulationState } from './game/types'
+import { useKeyboardInput } from './hooks/useKeyboardInput'
 import { GameScene } from './scene/GameScene'
 import './App.css'
 
@@ -13,6 +14,7 @@ function App() {
 		createInitialSimulation(),
 	)
 	const accumulatorRef = useRef(0)
+	const inputRef = useKeyboardInput()
 
 	return (
 		<main className="game-shell">
@@ -28,6 +30,7 @@ function App() {
 					<SimulationTicker
 						simulation={simulation}
 						accumulatorRef={accumulatorRef}
+						inputRef={inputRef}
 						onSimulationChange={setSimulation}
 					/>
 					<GameScene simulation={simulation} />
@@ -54,6 +57,7 @@ function App() {
 type SimulationTickerProps = {
 	readonly simulation: SimulationState
 	readonly accumulatorRef: React.MutableRefObject<number>
+	readonly inputRef: React.MutableRefObject<SimulationState['input']>
 	readonly onSimulationChange: React.Dispatch<
 		React.SetStateAction<SimulationState>
 	>
@@ -61,12 +65,14 @@ type SimulationTickerProps = {
 
 function SimulationTicker({
 	accumulatorRef,
+	inputRef,
 	onSimulationChange,
 }: SimulationTickerProps) {
 	useFrame((_, delta) => {
 		onSimulationChange((current) => {
 			const fixed = advanceFixedSimulation(current, delta * 1000, {
 				accumulatorMs: accumulatorRef.current,
+				input: inputRef.current,
 			})
 			accumulatorRef.current = fixed.accumulatorMs
 
