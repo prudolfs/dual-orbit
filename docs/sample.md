@@ -70,7 +70,7 @@ only by `scripts/build-readme-header.sh`, just like in `robotics-lab`.
 
 ## Implementation phases
 
-### Phase 1 — Pure-simulation bot driver (`src/game/bot/driver.ts`)
+### Phase 1 — Pure-simulation bot driver (`src/game/bot/driver.ts`) ✅
 
 The simulation already exposes `createInitialSimulation` and
 `tickSimulation`. The bot driver wraps them to step the simulation with a

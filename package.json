@@ -12,7 +12,9 @@
     "format:fix": "biome format --fix",
     "lint": "biome lint",
     "lint:fix": "biome lint --fix",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "vitest run",
+    "test:snapshot": "vitest run src/game/bot"
   },
   "dependencies": {
     "@react-three/drei": "^10.7.7",
@@ -37,6 +39,7 @@
     "babel-plugin-react-compiler": "^1.0.0",
     "globals": "^17.6.0",
     "typescript": "~6.0.2",
-    "vite": "^8.0.12"
-  } 
+    "vite": "^8.0.12",
+    "vitest": "^4.1.10"
+  }
 }
