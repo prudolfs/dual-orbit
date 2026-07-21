@@ -9,3 +9,4 @@ export {
 	captureFrames,
 	runScenario,
 } from './driver'
+export { gauntletScenario, nearMissRewindScenario } from './scenarios'

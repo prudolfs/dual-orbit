@@ -104,7 +104,7 @@ The driver reproduces a scenario by:
 Done when a driver can step a scenario offline in Node and return every
 snapshot, with output identical across runs (golden-snapshot in a Vitest test).
 
-### Phase 2 — Curated highlight scenarios (`src/game/bot/scenarios.ts`)
+### Phase 2 — Curated highlight scenarios (`src/game/bot/scenarios.ts`) ✅
 
 Hand-authored timelines producing readable highlights, chosen *because* the
 numbers behind them are known. Examples:
