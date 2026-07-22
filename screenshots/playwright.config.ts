@@ -4,13 +4,13 @@ import { defineConfig, devices } from '@playwright/test'
  * Playwright config used *only* by `scripts/build-readme-header.sh` (Phase 5)
  * to capture the README header GIF. Adapted from `robotics-lab`'s
  * `screenshots/playwright.config.ts`: `testDir: '.'`, its own `webServer`
- * (Vite dev server on :8090 here), separate from the regular Vitest test run.
+ * (Vite preview on :8090), separate from the regular Vitest test run.
  *
- * The webServer launches the dev build (`pnpm dev`) so `import.meta.env.DEV`
- * is `true` and `installBotIfDev` exposes `window.__BOT__` (Phase 3 bridge),
- * letting the spec drive the real game with a deterministic bot scenario.
- * Phase 5 will swap this for a `VITE_BOT_BRIDGE=1 pnpm preview` of the
- * production build once it is wired up.
+ * The webServer builds the production bundle with `VITE_BOT_BRIDGE=1` and
+ * serves it via `vite preview`, so the Phase 3 bot bridge is installed at
+ * runtime (`installBotIfDev` opts in on the flag) and the spec drives the
+ * *real* running game with a deterministic scenario. Plain production builds
+ * (without the flag) never ship the bridge.
  *
  * Invoke through the wrapper, never `playwright test` directly.
  */
@@ -40,9 +40,10 @@ export default defineConfig({
 		},
 	],
 	webServer: {
-		command: 'pnpm dev --port 8090 --strictPort',
+		command:
+			'VITE_BOT_BRIDGE=1 pnpm build && VITE_BOT_BRIDGE=1 pnpm preview --port 8090 --strictPort',
 		url: 'http://localhost:8090',
 		reuseExistingServer: !process.env.CI,
-		timeout: 120_000,
+		timeout: 180_000,
 	},
 })

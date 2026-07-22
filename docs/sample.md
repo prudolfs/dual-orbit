@@ -181,7 +181,7 @@ wall-clock delays (which is what `robotics-lab` does).
 Done when `pnpm exec playwright test --config screenshots/playwright.config.ts`
 writes a clean frame sequence from the preview build.
 
-### Phase 5 — GIF assembly wrapper (`scripts/build-readme-header.sh`)
+### Phase 5 — GIF assembly wrapper (`scripts/build-readme-header.sh`) ✅
 
 Port the `robotics-lab` script almost verbatim, dropping the workspace
 references and pointing at the single Vite app:
