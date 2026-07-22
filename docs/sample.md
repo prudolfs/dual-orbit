@@ -151,7 +151,7 @@ Done when the preview build exposes a bot replay path and a tiny unit test
 confirms the browser-driven state at a capture tick matches the offline
 golden snapshot to within the fixed-timestep.
 
-### Phase 4 — Playwright capture spec (`screenshots/`)
+### Phase 4 — Playwright capture spec (`screenshots/`) ✅
 
 A capture-only Playwright config and spec, adapted from `robotics-lab`:
 

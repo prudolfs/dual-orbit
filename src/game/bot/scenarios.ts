@@ -63,7 +63,7 @@ const NEAR_MISS_HOLD_TICKS = 130
 export const gauntletScenario: BotScenario = {
 	seed: 3,
 	steps: buildGauntletSteps(GAUNTLET_NUM_BURSTS, GAUNTLET_DIRECTION_BURST),
-	captureTicks: [0, 24, 50, 74, 100, 124, 150, 174, 200, 224, 250],
+	captureTicks: [0, 22, 44, 66, 88, 110, 132, 154, 176, 198, 242],
 }
 
 /**

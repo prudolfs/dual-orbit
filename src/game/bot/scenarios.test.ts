@@ -335,7 +335,7 @@ describe('bot scenarios (Phase 2)', () => {
 				    "tick": 21,
 				  },
 				  {
-				    "capt": false,
+				    "capt": true,
 				    "collisions": 0,
 				    "mode": "running",
 				    "obstacles": 11,
@@ -359,7 +359,7 @@ describe('bot scenarios (Phase 2)', () => {
 				    "tick": 23,
 				  },
 				  {
-				    "capt": true,
+				    "capt": false,
 				    "collisions": 0,
 				    "mode": "running",
 				    "obstacles": 11,
@@ -599,7 +599,7 @@ describe('bot scenarios (Phase 2)', () => {
 				    "tick": 43,
 				  },
 				  {
-				    "capt": false,
+				    "capt": true,
 				    "collisions": 0,
 				    "mode": "running",
 				    "obstacles": 11,
@@ -671,7 +671,7 @@ describe('bot scenarios (Phase 2)', () => {
 				    "tick": 49,
 				  },
 				  {
-				    "capt": true,
+				    "capt": false,
 				    "collisions": 0,
 				    "mode": "running",
 				    "obstacles": 11,
@@ -863,7 +863,7 @@ describe('bot scenarios (Phase 2)', () => {
 				    "tick": 65,
 				  },
 				  {
-				    "capt": false,
+				    "capt": true,
 				    "collisions": 0,
 				    "mode": "running",
 				    "obstacles": 11,
@@ -959,7 +959,7 @@ describe('bot scenarios (Phase 2)', () => {
 				    "tick": 73,
 				  },
 				  {
-				    "capt": true,
+				    "capt": false,
 				    "collisions": 0,
 				    "mode": "running",
 				    "obstacles": 11,
@@ -1127,7 +1127,7 @@ describe('bot scenarios (Phase 2)', () => {
 				    "tick": 87,
 				  },
 				  {
-				    "capt": false,
+				    "capt": true,
 				    "collisions": 0,
 				    "mode": "running",
 				    "obstacles": 11,
@@ -1271,7 +1271,7 @@ describe('bot scenarios (Phase 2)', () => {
 				    "tick": 99,
 				  },
 				  {
-				    "capt": true,
+				    "capt": false,
 				    "collisions": 0,
 				    "mode": "running",
 				    "obstacles": 11,
@@ -1391,7 +1391,7 @@ describe('bot scenarios (Phase 2)', () => {
 				    "tick": 109,
 				  },
 				  {
-				    "capt": false,
+				    "capt": true,
 				    "collisions": 0,
 				    "mode": "running",
 				    "obstacles": 11,
@@ -1559,7 +1559,7 @@ describe('bot scenarios (Phase 2)', () => {
 				    "tick": 123,
 				  },
 				  {
-				    "capt": true,
+				    "capt": false,
 				    "collisions": 0,
 				    "mode": "running",
 				    "obstacles": 11,
@@ -1655,7 +1655,7 @@ describe('bot scenarios (Phase 2)', () => {
 				    "tick": 131,
 				  },
 				  {
-				    "capt": false,
+				    "capt": true,
 				    "collisions": 0,
 				    "mode": "running",
 				    "obstacles": 11,
@@ -1871,7 +1871,7 @@ describe('bot scenarios (Phase 2)', () => {
 				    "tick": 149,
 				  },
 				  {
-				    "capt": true,
+				    "capt": false,
 				    "collisions": 0,
 				    "mode": "running",
 				    "obstacles": 11,
@@ -1919,7 +1919,7 @@ describe('bot scenarios (Phase 2)', () => {
 				    "tick": 153,
 				  },
 				  {
-				    "capt": false,
+				    "capt": true,
 				    "collisions": 0,
 				    "mode": "running",
 				    "obstacles": 11,
@@ -2159,7 +2159,7 @@ describe('bot scenarios (Phase 2)', () => {
 				    "tick": 173,
 				  },
 				  {
-				    "capt": true,
+				    "capt": false,
 				    "collisions": 1,
 				    "mode": "rollingBack",
 				    "obstacles": 11,
@@ -2183,7 +2183,7 @@ describe('bot scenarios (Phase 2)', () => {
 				    "tick": 175,
 				  },
 				  {
-				    "capt": false,
+				    "capt": true,
 				    "collisions": 1,
 				    "mode": "rollingBack",
 				    "obstacles": 11,
@@ -2447,7 +2447,7 @@ describe('bot scenarios (Phase 2)', () => {
 				    "tick": 197,
 				  },
 				  {
-				    "capt": false,
+				    "capt": true,
 				    "collisions": 1,
 				    "mode": "rollingBack",
 				    "obstacles": 11,
@@ -2471,7 +2471,7 @@ describe('bot scenarios (Phase 2)', () => {
 				    "tick": 199,
 				  },
 				  {
-				    "capt": true,
+				    "capt": false,
 				    "collisions": 1,
 				    "mode": "rollingBack",
 				    "obstacles": 11,
@@ -2759,7 +2759,7 @@ describe('bot scenarios (Phase 2)', () => {
 				    "tick": 223,
 				  },
 				  {
-				    "capt": true,
+				    "capt": false,
 				    "collisions": 1,
 				    "mode": "running",
 				    "obstacles": 11,
@@ -2975,7 +2975,7 @@ describe('bot scenarios (Phase 2)', () => {
 				    "tick": 241,
 				  },
 				  {
-				    "capt": false,
+				    "capt": true,
 				    "collisions": 1,
 				    "mode": "running",
 				    "obstacles": 11,

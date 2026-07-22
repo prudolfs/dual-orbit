@@ -14,7 +14,9 @@
     "lint:fix": "biome lint --fix",
     "preview": "vite preview",
     "test": "vitest run",
-    "test:snapshot": "vitest run src/game/bot"
+    "test:snapshot": "vitest run src/game/bot",
+    "screenshots": "playwright test --config screenshots/playwright.config.ts",
+    "screenshots:debug": "playwright test --config screenshots/playwright.config.ts --headed"
   },
   "dependencies": {
     "@react-three/drei": "^10.7.7",
@@ -29,6 +31,7 @@
     "@babel/core": "^7.29.0",
     "@biomejs/biome": "2.4.16",
     "@eslint/js": "^10.0.1",
+    "@playwright/test": "^1.61.1",
     "@rolldown/plugin-babel": "^0.2.3",
     "@types/babel__core": "^7.20.5",
     "@types/node": "^24.12.3",

@@ -34,16 +34,25 @@ export function installBot(host: BotBridgeHost): BotBridge {
 }
 
 /**
- * Install `window.__BOT__` only outside production. Returns the bridge (or
- * `null` in a production build, mirroring `robotics-lab`'s `window.__E2E__`
- * gating).
+ * Install `window.__BOT__` only when the bridge is opted-in at runtime:
+ *
+ *   - a dev build (`import.meta.env.DEV`), or
+ *   - a build with `VITE_BOT_BRIDGE=1` (used by the Playwright capture
+ *     harness so the production *preview* build exposes the backdoor without
+ *     shipping it in plain releases).
+ *
+ * Mirrors `robotics-lab`'s `window.__E2E__` gating shape but is opt-in by a
+ * Vite env flag rather than always-on, since unlike the read-only `__E2E__`
+ * probe this bridge drives simulation *input*. Returns the bridge (or `null`
+ * when gated out).
  */
 export function installBotIfDev(host: BotBridgeHost): BotBridge | null {
-	if (import.meta.env.PROD) {
-		return null
+	const env = import.meta.env
+	if (env.DEV || env.VITE_BOT_BRIDGE === '1') {
+		return installBot(host)
 	}
 
-	return installBot(host)
+	return null
 }
 
 /**

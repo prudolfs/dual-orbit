@@ -9,10 +9,13 @@
 		"ignoreUnknown": false,
 		"includes": [
 			"src/**",
+			"screenshots/**",
+			"vitest.config.ts",
 			"!**/node_modules",
 			"!**/public",
 			"!**/dist",
-			"!**/build"
+			"!**/build",
+			"!screenshots/.results"
 		]
 	},
 	"formatter": {
