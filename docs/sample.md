@@ -128,7 +128,7 @@ golden snapshot so gameplay drift breaks the test, not the GIF.
 Done when at least two scenarios exist as exported `BotScenario` values with
  Vitest golden-snapshot coverage for the full tick sequence.
 
-### Phase 3 — Replay bridge into the browser
+### Phase 3 — Replay bridge into the browser ✅
 
 The bot timeline must drive the *real* running game so Playwright screenshots
 the actual R3F scene, not a second renderer. Two viable shapes:
