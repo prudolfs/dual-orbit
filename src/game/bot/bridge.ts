@@ -1,7 +1,15 @@
 import type { SimulationState } from '../types'
 import type { BotScenario } from './driver'
 import { runScenario } from './driver'
-import { BotPlayback } from './scripted-source'
+import {
+	type BotPlayback,
+	createInitialState,
+	createPlayback,
+	playbackActive,
+	next as playbackNext,
+	playbackTick,
+	stepOffline,
+} from './scripted-source'
 
 /**
  * Public surface installed on `window.__BOT__` (preview build only,
@@ -12,10 +20,14 @@ import { BotPlayback } from './scripted-source'
  * scenario instead of synthesizing keyboard events.
  *
  * The bridge never owns a parallel simulation — it only returns the seeded
- * initial state and exposes the active playback so the app's existing
+ * initial state and exposes the active playback cursor so the app's existing
  * `SimulationTicker` can step the same `tickSimulation` the player uses. The
  * screenshot and the offline golden snapshot are therefore governed by one
  * code path.
+ *
+ * `active` is the immutable {@link Playback} cursor (re-exported as
+ * {@link BotPlayback} for back-compat); each bot frame *replaces* the held
+ * cursor with the next one rather than mutating it.
  */
 export type BotBridge = {
 	readonly __brand: 'bot-bridge'
@@ -26,7 +38,7 @@ export type BotBridge = {
 	/** Stop bot playback and hand control back to the keyboard. */
 	stop: () => void
 
-	/** The active playback, or `null` when the bot is idle. */
+	/** The active playback cursor, or `null` when the bot is idle. */
 	readonly active: BotPlayback | null
 
 	/** Subscribe to capture-tick events; returns an unsubscribe. */
@@ -59,7 +71,8 @@ const BRAND = 'bot-bridge' as const
  *
  * - `'step'` — the bot advanced the simulation; apply the returned state.
  * - `'capture'` — same as `'step'` but it lands on a scenario capture tick.
- * - `'component'` would be richer, but these three cover the ticker's needs.
+ * - `'idle'` — the bot is not driving; the ticker falls back to the keyboard
+ *   path.
  */
 export type BotFrameResult =
 	| { readonly kind: 'idle' }
@@ -80,18 +93,19 @@ export function createBotBridge(host: BotBridgeHost): BotBridge {
 		}
 	}
 
-	function playScenario(scenario: BotScenario): SimulationState {
-		const playback = new BotPlayback(scenario)
-		const initial = playback.createInitialState()
+	function setActive(next: BotPlayback | null): void {
+		active = next
+	}
 
-		active = playback
+	function playScenario(scenario: BotScenario): SimulationState {
+		const initial = createInitialState(scenario)
+		active = createPlayback(scenario)
 		host.setSimulation(() => initial)
 
 		return initial
 	}
 
 	function stop(): void {
-		active?.stop()
 		active = null
 	}
 
@@ -130,20 +144,22 @@ export function createBotBridge(host: BotBridgeHost): BotBridge {
 		offlineSnapshotAt,
 	}
 
-	// Stash the emitter on the bridge instance so the frame stepper (which the
-	// ticker calls many times per second) can fan capture events out without a
-	// second lookup. Kept off the public surface via a non-enumerable symbol.
-	;(
-		bridge as unknown as {
-			__emitCapture: typeof emitCapture
-		}
-	).__emitCapture = emitCapture
+	// Stash private helpers on the bridge instance so the frame stepper (which
+	// the ticker calls many times per second) can fan capture events out and
+	// replace the held cursor without re-entering the closure. Both are kept
+	// off the public surface via a non-enumerable stash.
+	const stash = bridge as unknown as {
+		__emitCapture: typeof emitCapture
+		__setActive: typeof setActive
+	}
+	stash.__emitCapture = emitCapture
+	stash.__setActive = setActive
 
 	return bridge
 }
 
 /**
- * Drive one bot frame: if a {@link BotPlayback} is active, step it forward
+ * Drive one bot frame: if a playback cursor is active, step it forward
  * exactly one deterministic `tickSimulation`, bypassing the wall-clock
  * accumulator so the live run stays byte-identical with the offline golden.
  *
@@ -157,30 +173,44 @@ export function advanceBotFrame(
 	simulation: SimulationState,
 	bridge: BotBridge,
 ): BotFrameResult {
-	const playback = bridge.active
+	const current = bridge.active
 
-	if (!playback?.active) {
+	if (!current || !playbackActive(current)) {
 		return { kind: 'idle' }
 	}
 
-	const instruction = playback.next()
+	const advanced = playbackNext(current)
 
-	if (!instruction.step) {
+	if (!advanced.instruction.step) {
+		// Playback finished — drop the cursor so subsequent frames fall back
+		// to the keyboard path. Tests that re-enter will see `idle`.
+		const stop = (
+			bridge as unknown as { __setActive?: (n: BotPlayback | null) => void }
+		).__setActive
+		stop?.(null)
 		return { kind: 'idle' }
 	}
 
-	const stepped = playback.stepOffline(simulation, playback.tick)
+	const tick = playbackTick(advanced.playback)
+	const stepped = stepOffline(simulation, advanced.playback.scenario, tick)
 
-	if (instruction.capture) {
+	// Replace the held cursor with the advanced one so the next frame
+	// continues from the new tick.
+	const setActive = (
+		bridge as unknown as { __setActive?: (n: BotPlayback | null) => void }
+	).__setActive
+	setActive?.(advanced.playback)
+
+	if (advanced.instruction.capture) {
 		const emit = (
 			bridge as unknown as {
 				__emitCapture?: (tick: number, state: SimulationState) => void
 			}
 		).__emitCapture
 
-		emit?.(playback.tick, stepped)
+		emit?.(tick, stepped)
 
-		return { kind: 'capture', tick: playback.tick, state: stepped }
+		return { kind: 'capture', tick, state: stepped }
 	}
 
 	return { kind: 'step', state: stepped }

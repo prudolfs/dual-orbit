@@ -1,5 +1,11 @@
 import { createInitialSimulation, tickSimulation } from '../simulation'
-import type { DirectionState, SimulationInput, SimulationState } from '../types'
+import type {
+	DirectionState,
+	GeneratorState,
+	SimulationInput,
+	SimulationState,
+	Vec2,
+} from '../types'
 import { directionToInput } from '../types'
 
 /**
@@ -20,9 +26,24 @@ export type BotStep = {
  * A deterministic scripted run of the simulation, authored against the pure
  * `tickSimulation` path. No DOM, no rendering — only the seeded initial state
  * and the per-tick input timeline.
+ *
+ * `seed` alone reproduces the default-curriculum cold open (`levelPerGroup`,
+ * `group` at the generator's defaults, orbiting the top of the play area).
+ * `generator` and `orbitCenter` opt-in to *teleporting* the run deep into a
+ * denser, higher-level obstacle field — see `docs/level-design.md`. Both
+ * overrides are threaded into `createInitialSimulation` so the offline golden
+ * and the browser bridge reproduce the same spawned state bit-for-bit.
  */
 export type BotScenario = {
 	readonly seed: number
+	/**
+	 * Partial generator override (level/group/levelsPerGroup/...). Merged on
+	 * top of `{ seed: scenario.seed }` when seeding the run, so a teleport
+	 * scenario only needs to specify the fields it changes.
+	 */
+	readonly generator?: Partial<Omit<GeneratorState, 'seed'>>
+	/** Spawns the orbit at this centre. Defaults to top-of-area. */
+	readonly orbitCenter?: Vec2
 	readonly steps: readonly BotStep[]
 	/** Ticks at which a frame should later be grabbed by the capture harness. */
 	readonly captureTicks: readonly number[]
@@ -100,7 +121,8 @@ export function runScenario(
 	options: RunScenarioOptions = {},
 ): BotResult {
 	const state = createInitialSimulation({
-		generator: { seed: scenario.seed },
+		generator: { seed: scenario.seed, ...scenario.generator },
+		orbitCenter: scenario.orbitCenter,
 	})
 	const captureSet = new Set(scenario.captureTicks)
 	const totalTicks = Math.max(

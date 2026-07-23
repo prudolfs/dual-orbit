@@ -14,7 +14,7 @@
 #
 # Env knobs (set by .env or inline; overridable):
 #   SCENARIO   scenario export name from src/game/bot/scenarios
-#              (default: 'gauntletScenario').
+#              (default: 'rotatingFieldScenario').
 #   FRAME_MS   wall-clock ms *of GIF playback* per frame (default: 1200).
 #              Sets the GIF's playback cadence; capture cadence is governed by
 #              the render loop, not this knob.
@@ -36,7 +36,7 @@ set -euo pipefail
 out="${1:-docs/readme-header.gif}"
 width="${WIDTH:-1200}"
 frame_ms="${FRAME_MS:-1200}"
-scenario="${SCENARIO:-gauntletScenario}"
+scenario="${SCENARIO:-rotatingFieldScenario}"
 
 # Repo-root guard (the playwright config is relative to the repo root).
 if [ ! -f "package.json" ] || [ ! -f "screenshots/playwright.config.ts" ]; then

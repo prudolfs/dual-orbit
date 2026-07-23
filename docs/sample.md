@@ -37,7 +37,7 @@ The simulation is the key enabler. From
   prior ticks, ideal for a "near-miss then rewind" highlight.
 
 Because everything is computed from exact numbers, a **bot driver** can decide
-"rotate right for `N` ticks then release" and *know* the resulting orb angles
+"rotate right for `N` ticks then release" and _know_ the resulting orb angles
 and obstacle gaps ahead of time. It does not need vision or heuristics. It can
 precompute a scenario, hand it to the real UI, and Playwright screenshots the
 deterministic result. The screenshots are not of a fake renderer — they are of
@@ -84,15 +84,15 @@ the exact rotation math in `game/simulation/orbit` and the collision math in
 
 ```ts
 type BotStep = {
-  readonly tick: number
-  readonly direction: DirectionState // -1 left, 0 neutral, 1 right
-  readonly collisionAction: 'rollback' | 'rewind'
-}
+  readonly tick: number;
+  readonly direction: DirectionState; // -1 left, 0 neutral, 1 right
+  readonly collisionAction: "rollback" | "rewind";
+};
 type BotScenario = {
-  readonly seed: number
-  readonly steps: readonly BotStep[]
-  readonly captureTicks: readonly number[] // ticks at which a frame should be grabbed
-}
+  readonly seed: number;
+  readonly steps: readonly BotStep[];
+  readonly captureTicks: readonly number[]; // ticks at which a frame should be grabbed
+};
 ```
 
 The driver reproduces a scenario by:
@@ -101,12 +101,20 @@ The driver reproduces a scenario by:
 2. For each tick, applying `directionToInput(step.direction)` to `tickSimulation`.
 3. Emitting each `(tick, state)` pair, marking `captureTicks`.
 
+Input/state shapes are declared with **`type` over `interface`** (only
+Structurally-required TypeScript interfaces or ones needing declaration
+merging would warrant `interface`), and every emitted value is a
+`readonly` immutable record composed from pure functions (`stepForTick`,
+`neutralStep`) — no class, no shared mutable state. Returning a fresh snapshot
+array per call keeps the offline run referentially transparent, which is
+what makes golden-snapshot diffing reliable.
+
 Done when a driver can step a scenario offline in Node and return every
 snapshot, with output identical across runs (golden-snapshot in a Vitest test).
 
 ### Phase 2 — Curated highlight scenarios (`src/game/bot/scenarios.ts`) ✅
 
-Hand-authored timelines producing readable highlights, chosen *because* the
+Hand-authored timelines producing readable highlights, chosen _because_ the
 numbers behind them are known. Examples:
 
 - **Gauntlet** — a sequence of timed rotates that thread several obstacles in
@@ -120,17 +128,78 @@ numbers behind them are known. Examples:
   computed from encounter timing, the scenario times its rotate so an orb
   passes just as the bar sweeps out of the way.
 
+#### Picking `captureTicks` — depth over breadth
+
+The GIF is a _highlight reel_, not a faithful playback, and the most visually
+interesting frames exist **deep into a run**, not at the start. Early ticks of
+a scenario are mostly empty whitespace — the orbit is still high, the seeded
+generator has spawned few obstacles, and the orbs sit alone on a bare stage.
+A naive capture-tick list spread evenly across the whole run would spend
+roughly half its frames on that dull cold-open.
+
+The math behind _which_ deep-elect tick means "dodge easily" — orbit and
+obstacle placement, the pre-rotation alignment of `angular` bars, the
+closed-form reachability in terms of `verticalSpeed = 7 u/tick` and
+`angularSpeed = 4°/tick` — is documented in
+[`docs/level-design.md`](./level-design.md). That's the shared lens
+scenarios below are authored against.
+
+Capture ticks are therefore authored to land at **peak density** moments:
+
+- **Skip the cold open.** Tick `0` (and usually the first ~40 ticks) is
+  grabbed only as a single establishing frame when wanted — not as a
+  cadence. The bulk of captures start once the orbit has climbed into the
+  obstacle field and the generator is emitting overlapping obstacle groups.
+- **Land on complex rotation.** Picks ticks where the orbs are mid-swing
+  across a large angular arc (e.g. burst boundaries at `~22`-tick intervals,
+  where the cumulative angle approaches `~88°`), so a frame shows the orbs
+  visibly tilted _between_ lanes rather than parked at rest on the orbit's
+  shoulders.
+- **Land on multiple obstacles in view.** Choose ticks where the seeded
+  generator has at least one down-field group _and_ an up-field group in the
+  camera frustum — so each frame shows several obstacles, not a lone bar
+  surrounded by empty space. The authoring loop is: simulate offline, count
+  `state.obstacles` at each candidate tick, and reject candidates whose
+  in-view obstacle count collapses to one or two.
+- **Land on rotating obstacles.** For `angular` obstacles (whose bars sweep
+  over `2π / spinPeriod`), pick a tick where the bar is mid-rotation _across_
+  the orb's gap — i.e. the bar angle is well away from `0` and `π` — so the
+  rotation is visually legible rather than presenting edge-on (which reads as
+  a static line).
+
+These constraints make capture-tick selection an offline, data-driven step:
+the author iterates against the projected snapshot (orb angles, obstacle
+positions, obstacle kinds, in-view counts) rather than eyeballing a video.
+The projection used by the golden test (`scenarios.test.ts` →
+`project(snapshot)`) is reused as the authoring lens, so a tick chosen as
+"peak" is _asserted_ to carry the obstacle/angular density that makes it
+interesting — drift in the generator that empties a peak frame fails the
+test before the GIF goes stale.
+
 Scenarios are authored against the pure simulation first, simulated offline,
 and validated by assertions on the output (e.g. "a collision occurred at tick
-T", "rewind count == 1 at the end"). A Vitest test pins each scenario's
-golden snapshot so gameplay drift breaks the test, not the GIF.
+T", "rewind count == 1 at the end", "capture tick N has ≥ K obstacles in
+view"). A Vitest test pins each scenario's golden snapshot — including the
+obstacle/angular density at each capture tick — so gameplay drift breaks the
+test, not the GIF.
+
+#### Functional style
+
+Scenarios and their builders are plain **modules of pure functions over
+immutable records** — no classes, no shared mutable state. Each `BotScenario`
+is a frozen `readonly` value built by small builder functions
+(`buildGauntletSteps`, `buildNearMissSteps`) composed from a handful of
+tuning constants at the top of the module. This keeps the authored values
+inspection-flat in golden output and makes partial-application / variant
+authoring trivial.
 
 Done when at least two scenarios exist as exported `BotScenario` values with
- Vitest golden-snapshot coverage for the full tick sequence.
+Vitest golden-snapshot coverage for the full tick sequence, and every
+`captureTick` is asserted to land on a peak-density frame.
 
 ### Phase 3 — Replay bridge into the browser ✅
 
-The bot timeline must drive the *real* running game so Playwright screenshots
+The bot timeline must drive the _real_ running game so Playwright screenshots
 the actual R3F scene, not a second renderer. Two viable shapes:
 
 - **A. Backdoor input timeline (preferred).** Expose `window.__BOT__` in the
@@ -146,6 +215,26 @@ the actual R3F scene, not a second renderer. Two viable shapes:
 The bridge must reuse the same `tickSimulation` module the player uses — no
 parallel simulation — so the screenshot and the offline golden snapshot are
 governed by the same code path.
+
+#### Functional style
+
+The bridge is a **factory function** (`createBotBridge`) returning a frozen
+record typed as a `type BotBridge` — no base class, no inheritance. Behavior
+is composed from small pure functions: `stepForTick`, `neutralStep`, and the
+offline `runScenario`/`captureFrames` helpers live in the driver module and
+are reused by both the Node path and the browser parity check. The installer
+module (`installer.ts`) is likewise a set of free functions
+(`installBot`, `installBotIfDev`, `driveFrame`, `onBotCapture`) over
+`window.__BOT__`.
+
+The one class in the pipeline is `BotPlayback` (`scripted-source.ts`). It is
+retained because the browser ticker calls it once per render frame and it
+carries per-frame cursor/pacing state that does not belong on the immutable
+scenario record; this is the "significant value" carve-out for classes. Its
+public surface is a shallow, data-like API (`createInitialState`, `next`,
+`stepOffline`, `isCaptureTick`, `tick`, `active`) backed by pure functions,
+so it stays easy to test and reason about in isolation — the only mutation is
+the advance of the playback cursor.
 
 Done when the preview build exposes a bot replay path and a tiny unit test
 confirms the browser-driven state at a capture tick matches the offline
@@ -173,10 +262,20 @@ The spec:
    ffmpeg's sequence input).
 4. Asserts the expected number of frames were written.
 
-Because the timeline is deterministic, capture ticks can be chosen to land on
-*peak moments* — the instant an orb slips through a gap, the start of the
-rewind, the stabilized state after rewind — rather than guessing at
+Because the timeline is deterministic, capture ticks are authored **offline
+in `scenarios.ts`** to land on _peak-density_ moments (see Phase 2's
+"Picking `captureTicks`") — the instant an orb slips through a gap deep in
+the gauntlet, the start of a rewind _after_ the orbit is already threading
+obstacles, the stabilized state after rewind with rotating bars mid-sweep in
+the background — rather than the empty-arena early ticks or guessing at
 wall-clock delays (which is what `robotics-lab` does).
+
+The spec itself is capture-tick-agnostic: it subscribes to the bridge's
+`onCapture` events and writes whatever `frame-NNNN.png` the scenario's tick
+sequence dictates, so improving the GIF means editing the scenario, not the
+spec. The bridge fans capture events out via a small function (`emitCapture`)
+over a `Set` of handler callbacks — no class inheritance, no input-layer
+coupling.
 
 Done when `pnpm exec playwright test --config screenshots/playwright.config.ts`
 writes a clean frame sequence from the preview build.
@@ -189,7 +288,7 @@ references and pointing at the single Vite app:
 ```
 scripts/build-readme-header.sh [output.gif]
   # Env knobs (same idea as robotics-lab):
-  #   SCENARIO        scenario name from src/game/bot/scenarios (default: gauntlet)
+  #   SCENARIO        scenario name from src/game/bot/scenarios (default: rotatingField)
   #   FRAME_COUNT     frames to capture (overridden by scenario.captureTicks when set)
   #   FRAME_MS        wall-clock ms between frames (fallback cadence)
   #   WIDTH           output GIF width (default 1200, height kept even)
@@ -214,7 +313,7 @@ GIF referenced by the root `README.md` header.
 - Add a `pnpm test:snapshot` (Vitest) workflow that runs the bot driver offline
   for all scenarios and compares the tick sequence against golden JSON. Update
   goldens deliberately when gameplay intentionally changes. This makes the GIF
-  a *test artifact*: gameplay drift breaks CI before the GIF goes stale.
+  a _test artifact_: gameplay drift breaks CI before the GIF goes stale.
 - Wire a root npm script:
   ```json
   "readme:header": "scripts/build-readme-header.sh"

@@ -15,19 +15,19 @@
 // Env knobs (set by the wrapper, overridable):
 //   E2E_FRAMES_DIR   Where to write PNG frames (required).
 //   BOT_SCENARIO     Scenario export name from src/game/bot/scenarios
-//                    (default: 'gauntletScenario').
+//                    (default: 'rotatingFieldScenario').
 
 import { mkdir, readdir, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { expect, type Page, test } from '@playwright/test'
 import type { BotScenario } from '../src/game/bot/driver'
 import {
-	gauntletScenario,
 	nearMissRewindScenario,
+	rotatingFieldScenario,
 } from '../src/game/bot/scenarios'
 
 const SCENARIOS: Record<string, BotScenario> = {
-	gauntletScenario,
+	rotatingFieldScenario,
 	nearMissRewindScenario,
 }
 
@@ -51,7 +51,7 @@ test('capture README header frames at the scenario capture ticks', async ({
 	}
 	await mkdir(framesDir, { recursive: true })
 
-	const scenarioName = process.env.BOT_SCENARIO ?? 'gauntletScenario'
+	const scenarioName = process.env.BOT_SCENARIO ?? 'rotatingFieldScenario'
 	const scenario = SCENARIOS[scenarioName]
 	if (!scenario) {
 		throw new Error(

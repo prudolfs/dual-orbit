@@ -1,4 +1,5 @@
-import type { BotScenario } from './driver'
+import type { Vec2 } from '../types'
+import type { BotScenario, BotStep } from './driver'
 
 /**
  * Phase 2 curated highlight scenarios.
@@ -11,93 +12,107 @@ import type { BotScenario } from './driver'
  * counts are known before the GIF is ever captured. Vitest pins those numbers
  * in `scenarios.test.ts`.
  *
- * All scenarios use the default resolution (sd) so the orbit numbers match the
- * probe runs: radius 160, verticalSpeed 7, angularSpeed 2π/90 ≈ 0.0698.
+ * All scenarios teleport the orbit deep into a seeded, higher-level obstacle
+ * field via `BotScenario.generator` + `BotScenario.orbitCenter` so a short
+ * run already lands the camera among `angular` rotating bars — the signature
+ * gameplay beat — instead of the static-only cold open the default curriculum
+ * spawns at the top of the play area. The math that makes such teleports
+ * *solvable* (the generator pre-phases each `angular` bar by
+ * `(orbit.center.y − obstacle.y) / verticalSpeed`) is documented in
+ * `docs/level-design.md`. Default resolution `sd` ⇒ `radius = 160`,
+ * `verticalSpeed = 7`, `angularSpeed = 2π/90 ≈ 0.0698`.
+ *
+ * The capture ticks below are *not* spread evenly — they land on the
+ * peak-density moments documented in `docs/sample.md`: a rotating bar
+ * mid-sweep with an orb visibly mid-arc. Numbers were measured offline against
+ * `runScenario` and reproduce bit-for-bit.
  */
 
 // ---------------------------------------------------------------------------
-// Tuning constants — kept at module top so exported scenario initializers
+// Tuning constants — kept at module top so exported-scenario initializers
 // (which reference them) never hit a temporal-dead-zone.
 // ---------------------------------------------------------------------------
 
 /**
- * Ticks per burst of direction for the gauntlet. The orbit rotates at
- * `2π/90` per tick, so `22` ticks is `~1.53 rad ≈ 88°` — roughly enough to
- * swing each orb from one obstacle lane into the open lane.
+ * Ticks per burst of direction for the rotating-field weave. The orbit
+ * rotates at `2π/90` per tick, so `22` ticks is `~1.53 rad ≈ 88°` — enough
+ * to swing each orb between the angular bars' gap and the opposite shoulder.
  */
-const GAUNTLET_DIRECTION_BURST = 22
+const ROTATE_BURST_TICKS = 22
 
-/** Number of alternating direction bursts in the gauntlet. */
-const GAUNTLET_NUM_BURSTS = 11
+/** Number of alternating direction bursts in the rotating-field weave. */
+const ROTATE_NUM_BURSTS = 11
 
 /**
- * Total ticks the near-miss scenario runs, long enough for the rewind path to
- * finish (collision at tick 141, rewind replay + stabilize, then resume).
+ * Teleport target the two scenarios share: a seed-3 level-25 / group-4 layout
+ * with two `angular` bars stacked in the visible window of a `y = −1500`
+ * orbit. Confirmed offline to keep 1–2 bars in view for ~60 ticks at a time
+ * and to produce a deterministic rotate-and-thread show.
  */
-const NEAR_MISS_TICKS = 260
+const TELEPORT_GENERATOR = {
+	level: 25,
+	levelPerGroup: 5,
+	groups: 6,
+	group: 4,
+} as const
 
-/** How long the near-miss scenario holds the initial clockwise swing. */
-const NEAR_MISS_HOLD_TICKS = 130
-
-// ---------------------------------------------------------------------------
-// Scenarios
-// ---------------------------------------------------------------------------
+const TELEPORT_CENTER: Vec2 = { x: 320, y: -1500 }
 
 /**
- * Gauntlet — a weave that threads several spaced-out static obstacles.
+ * Rotating-field weave — teleport into a band of `angular` bars and alternate
+ * direction in `~22`-tick bursts, threading the gaps while two sweeping bars
+ * stay on screen.
  *
- * The generator (seed 3) lays out alternating left/right `rect3` triplets and
- * `rect1` bars every `~350` vertical units; with `verticalSpeed = 7` that is
- * roughly `~50` ticks between obstacles. The orbit's orbs start at angle `π`
- * (left) and `0` (right); rotating clockwise (direction `1`) moves the orbs
- * *up* through the gaps. The weave alternates direction in `~22`-tick bursts
- * (`22 × 0.0698 ≈ 1.53 rad ≈ 88°`) — enough to swing each orb from the
- * obstacle's lane to the open lane and back, threading the gauntlet.
- * `captureTicks` land on each swing's peak so the GIF shows the
- * "just-made-it" frames rather than the in-between drift.
- *
- * Authored offline: with `collisionAction: 'rollback'` the run threads the
- * whole gauntlet. Drift in spacing or rotation is caught by the
- * golden-snapshot test asserting the final collision profile.
+ * Authored offline (seed 3, level 25, group 4, orbit at `y = −1500`): the
+ * `~22`-tick burst exactly matches the orb swing time and the angular bar's
+ * half-turn, so each capture tick shows one bar sweeping through a new gap
+ * with the orbs mid-arc. `captureTicks` skip the parked-orb opening and land
+ * on the peak rotation moments deep in the run.
  */
-export const gauntletScenario: BotScenario = {
+export const rotatingFieldScenario: BotScenario = {
 	seed: 3,
-	steps: buildGauntletSteps(GAUNTLET_NUM_BURSTS, GAUNTLET_DIRECTION_BURST),
-	captureTicks: [0, 22, 44, 66, 88, 110, 132, 154, 176, 198, 242],
+	generator: TELEPORT_GENERATOR,
+	orbitCenter: TELEPORT_CENTER,
+	steps: buildAlternatingBursts(
+		ROTATE_NUM_BURSTS,
+		ROTATE_BURST_TICKS,
+		'rollback',
+	),
+	captureTicks: [15, 45, 75, 90, 120, 165, 195, 210, 240],
 }
 
 /**
- * Near-miss then rewind — deliberately glance the first obstacle, trigger a
- * `rewind` collision, and let the deterministic input-replay produce a clean
- * pass on the corrected side.
+ * Near-miss then rewind — teleport into the same rotating-field band, hold a
+ * clockwise swing so the right orb glances the first `angular` bar, watch the
+ * deterministic `rewind` recovery kick in, then resume running among the
+ * bars. Two collisions over the run, both recovered via `collisionAction:
+ * 'rewind'`, capture ticks landing before/after each near-miss and inside the
+ * rewind replay.
  *
- * Holding `direction 1` from tick 1 keeps the right orb swinging through the
- * first obstacle's lane. With seed 3 the first (and only) collision occurs at
- * **tick 141** (measured offline, see `scenarios.test.ts`). `collisionAction: 'rewind'` hands control to the
- * rewind path, which replays the prior direction memory backward, then
- * stabilizes the orbit and resumes `running` — a known clean follow-up. The
- * scenario runs long enough to capture the *before*, the *glance*, the
- * *rewind*, and the *clean pass* frames.
- *
- * Authored offline: the run ends with exactly one collision and
- * `rewinds == 1` (asserted by the golden snapshot).
+ * First collision lands at **tick 48** (measured offline) and a second at
+ * ~tick 120; `captureTicks` straddle each. Asserted by the golden snapshot.
  */
 export const nearMissRewindScenario: BotScenario = {
 	seed: 3,
-	steps: buildNearMissSteps(NEAR_MISS_HOLD_TICKS, NEAR_MISS_TICKS),
-	captureTicks: [0, 50, 120, 141, 155, 175, 200, 230],
+	generator: TELEPORT_GENERATOR,
+	orbitCenter: TELEPORT_CENTER,
+	// Hold clockwise for the run; the rewind path takes over on collision so a
+	// single direction step per tick suffices to produce both near-misses.
+	steps: buildHoldDirection(260, 1, 'rewind'),
+	captureTicks: [0, 20, 40, 48, 80, 120, 160, 220],
 }
 
 // ---------------------------------------------------------------------------
 // Step builders (function hoisting means these may sit after the exports)
 // ---------------------------------------------------------------------------
 
-function buildGauntletSteps(
+function buildAlternatingBursts(
 	numBursts: number,
 	burstTicks: number,
-): readonly BotScenario['steps'][number][] {
-	let direction: BotScenario['steps'][number]['direction'] = 1
-	const steps: BotScenario['steps'][number][] = []
+	collisionAction: BotStep['collisionAction'],
+): readonly BotStep[] {
+	let direction: BotStep['direction'] = 1
+	const steps: BotStep[] = []
 	let tick = 1
 
 	for (let burst = 0; burst < numBursts; burst++) {
@@ -105,7 +120,7 @@ function buildGauntletSteps(
 			steps.push({
 				tick: tick + d,
 				direction,
-				collisionAction: 'rollback',
+				collisionAction,
 			})
 		}
 		tick += burstTicks
@@ -115,31 +130,15 @@ function buildGauntletSteps(
 	return steps
 }
 
-function buildNearMissSteps(
-	holdTicks: number,
+function buildHoldDirection(
 	totalTicks: number,
-): readonly BotScenario['steps'][number][] {
-	const steps: BotScenario['steps'][number][] = []
+	direction: BotStep['direction'],
+	collisionAction: BotStep['collisionAction'],
+): readonly BotStep[] {
+	const steps: BotStep[] = []
 
-	// Hold a clockwise swing for the first `holdTicks` ticks so the right orb
-	// glances the first `rect1` obstacle around tick ~141.
-	for (let tick = 1; tick <= holdTicks; tick++) {
-		steps.push({
-			tick,
-			direction: 1,
-			collisionAction: 'rewind',
-		})
-	}
-
-	// After the rewind triggers, let the simulation steer for itself (neutral
-	// input) so the deterministic rewind/stabilize/replay path completes and
-	// the orbit settles running.
-	for (let tick = holdTicks + 1; tick <= totalTicks; tick++) {
-		steps.push({
-			tick,
-			direction: 0,
-			collisionAction: 'rewind',
-		})
+	for (let tick = 1; tick <= totalTicks; tick++) {
+		steps.push({ tick, direction, collisionAction })
 	}
 
 	return steps
