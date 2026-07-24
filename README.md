@@ -146,9 +146,10 @@ The header animation is generated automatically: a Playwright capture spec
 boots the game, a deterministic bot driver replays curated inputs through the
 simulation, the running scene is screenshotted at chosen ticks, and ffmpeg
 assembles a looping GIF. By default the spec plays a *showcase sequence* —
-one teleport per gameplay place (a static pair, a rotating bar, a moving bar,
-a slow `angular_long` sweep, a mixed frame) — so consecutive GIF frames show
-distinct obstacle kinds rather than the same row at different orb angles.
+one teleport per gameplay place (a static pair, a rotating bar, a mirror pair
+wide-gap thread, a slow `angular_long` sweep, a mixed frame) — so consecutive
+GIF frames show distinct obstacle kinds rather than the same row at different
+orb angles.
 Run from the repo root:
 
 ```sh

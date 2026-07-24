@@ -231,7 +231,7 @@ test('every showcaseSequence entry frames its declared obstacle kind on screen a
 	const expectedKindPerLabel: ReadonlyArray<readonly [string, ObstacleKind]> = [
 		['Static pair both sides + rotating bar', 'static'],
 		['Rotating angular bar mid-sweep', 'angular'],
-		['Moving bar beside statics', 'moving'],
+		['Mirror static pair — gap threading', 'static'],
 		['Slow angular_long sweep', 'angular_long'],
 		['Static bar + slow sweeper', 'static'],
 	]
@@ -257,6 +257,22 @@ test('every showcaseSequence entry frames its declared obstacle kind on screen a
 			onScreenObstacles(state).length,
 			`showcase '${entry.label}' has at least one obstacle on screen`,
 		).toBeGreaterThanOrEqual(1)
+	}
+})
+
+test('no showcaseSequence frame has a colliding orb at the capture tick', () => {
+	// A capture frame that has an orb mid-collision is a bad showcase — it
+	// reads as a glitch rather than gameplay. Pinned because the original
+	// "moving bar beside statics" frame teleported the orbit ON TOP of a
+	// `static` bar (orb0 colliding for every tick).
+	for (const entry of showcaseSequence) {
+		const tick = entry.scenario.captureTicks[0]
+		const state = snapshotAt(entry.scenario, tick)
+		const colliding = state.orbit.orbs.filter((orb) => orb.colliding).length
+		expect(
+			colliding,
+			`showcase '${entry.label}' has ${colliding} colliding orb(s) at capture tick ${tick}`,
+		).toBe(0)
 	}
 })
 

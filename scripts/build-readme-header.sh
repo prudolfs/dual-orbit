@@ -16,7 +16,7 @@
 #   SCENARIO        optional single-scenario override: a scenario export name
 #                   from src/game/bot/scenarios. When unset, the spec plays
 #                   the *showcase sequence* — one teleport per gameplay place
-#                   (static pair, rotating bar, moving bar, slow sweep,
+#                   (static pair, rotating bar, mirror pair, slow sweep,
 #                   mixed) — so the GIF shows obstacle diversity rather than
 #                   the same row at different orb angles. See
 #                   screenshots/readme-header.spec.ts.

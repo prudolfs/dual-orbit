@@ -31,7 +31,8 @@ import type { BotScenario, BotStep } from './driver'
 
  *   1. **Static pair** — a `static` bar on each shoulder of the orbit.
  *   2. **Rotating bar** — a centred `angular` bar sweeping mid-arc.
- *   3. **Moving bar** — a `moving` obstacle oscillating among statics.
+ *   3. **Mirror pair** — a wide `rect1` mirror pair narrowing the gap the
+ *      orbs thread.
  *   4. **Slow sweep** — a full-width `angular_long` bar rotating lazily.
  *   5. **Mixed** — a `static` bar alongside an `angular_long` sweeper.
  *
@@ -146,18 +147,24 @@ const rotatingBarShowcase = showcase(
 )
 
 /**
- * 3. **Moving bar among statics** (`seed 11`, a `rect3` `moving` bar at
- * `x = 517` flanked by two `rect1`/`rect3` static bars). The frame is the
- * seeded initial state — orbit at `y = −1800`, orbs at rest, the moving bar
- * poised mid-oscillation beside its static pair.
+ * 3. **Gap-threading mirror pair** (`seed 13`, a wide `rect1` `static` bar
+ * on each shoulder at `x = 160` / `480`, mirrored — the same `rect1` alias
+ * on both sides, `w = 320` each). Driving 10 ticks clockwise swings orb₀ to
+ * `220°` (and orb₁ symmetrically to `40°`) — the orbs threaded down the
+ * narrow mid gap between the mirror pair, no rotation involved. The earlier
+ * "moving bar" beat for this frame collided with a `static` bar at spawn
+ * (the orbit teleported *into* a `rect3`), so this beat — a clean `rect1`
+ * mirror, collision-free for the whole window — replaces it while keeping
+ * the gameplay diversity intact: it shows the wide-gap-thread that the other
+ * frames do not.
  */
-const movingBarShowcase = showcase(
-	'Moving bar beside statics',
-	11,
-	{ level: 5, group: 3 },
+const gapThreadShowcase = showcase(
+	'Mirror static pair — gap threading',
+	13,
+	{ level: 1, group: 1 },
 	{ x: 320, y: -1800 },
-	[],
-	0,
+	[[10, 1]],
+	10,
 )
 
 /**
@@ -199,7 +206,7 @@ const mixedShowcase = showcase(
 export const showcaseSequence: readonly ShowcaseEntry[] = [
 	staticPairShowcase,
 	rotatingBarShowcase,
-	movingBarShowcase,
+	gapThreadShowcase,
 	slowSweepShowcase,
 	mixedShowcase,
 ]

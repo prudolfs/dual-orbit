@@ -16,9 +16,9 @@
 // of {@link showcaseSequence} in turn, grabbing the (one) capture tick of
 // each and accumulating them into a single frame sequence. Each entry
 // teleports to a *different* gameplay place (static pair, rotating bar,
-// moving bar, slow sweep, mixed), so consecutive GIF frames show distinct
-// obstacle kinds — gameplay diversity — instead of the same row repeated at
-// different orb angles.
+// mirror pair gap-thread, slow sweep, mixed), so consecutive GIF frames show
+// distinct obstacle kinds — gameplay diversity — instead of the same row
+// repeated at different orb angles.
 //
 // Invoke via the wrapper (`scripts/build-readme-header.sh`, Phase 5), not
 // `playwright test` directly.
