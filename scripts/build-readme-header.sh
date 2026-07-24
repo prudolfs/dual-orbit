@@ -13,17 +13,18 @@
 #   scripts/build-readme-header.sh [output.gif]
 #
 # Env knobs (set by .env or inline; overridable):
-#   SCENARIO   scenario export name from src/game/bot/scenarios
-#              (default: 'rotatingFieldScenario').
-#   FRAME_MS   wall-clock ms *of GIF playback* per frame (default: 1200).
-#              Sets the GIF's playback cadence; capture cadence is governed by
-#              the render loop, not this knob.
-#   FRAME_COUNT  informational only — capture is driven by the scenario's
-#              `captureTicks`, so this is honored as an upper bound hint when
-#              the scenario exposes fewer frames than requested. Left as a
-#              no-op by default for parity with robotics-lab's surface.
-#   WIDTH      output GIF width in pixels (height auto, kept even; default 1200).
-#   FRAMERATE  GIF playback fps (defaults to 1000 / FRAME_MS).
+#   SCENARIO        optional single-scenario override: a scenario export name
+#                   from src/game/bot/scenarios. When unset, the spec plays
+#                   the *showcase sequence* — one teleport per gameplay place
+#                   (static pair, rotating bar, moving bar, slow sweep,
+#                   mixed) — so the GIF shows obstacle diversity rather than
+#                   the same row at different orb angles. See
+#                   screenshots/readme-header.spec.ts.
+#   FRAME_MS        wall-clock ms *of GIF playback* per frame (default: 1200).
+#                   Sets the GIF's playback cadence; capture cadence is governed
+#                   by the render loop, not this knob.
+#   WIDTH           output GIF width in pixels (height auto, kept even; default 1200).
+#   FRAMERATE       GIF playback fps (defaults to 1000 / FRAME_MS).
 #
 # Requires: pnpm, @playwright/test (devDep), ffmpeg on PATH.
 # The capture spec lives in screenshots/readme-header.spec.ts and is invoked
@@ -36,7 +37,9 @@ set -euo pipefail
 out="${1:-docs/readme-header.gif}"
 width="${WIDTH:-1200}"
 frame_ms="${FRAME_MS:-1200}"
-scenario="${SCENARIO:-rotatingFieldScenario}"
+# An explicit SCENARIO plays just that export; leaving unset plays the
+# showcase sequence — one teleport per gameplay place.
+scenario="${SCENARIO:-}"
 
 # Repo-root guard (the playwright config is relative to the repo root).
 if [ ! -f "package.json" ] || [ ! -f "screenshots/playwright.config.ts" ]; then
@@ -59,9 +62,16 @@ command -v pnpm >/dev/null || {
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 export E2E_FRAMES_DIR="$tmp/frames"
-export BOT_SCENARIO="$scenario"
-
-echo "build-readme-header: capturing '$scenario' frames with Playwright…"
+# Only forward BOT_SCENARIO when the operator explicitly picked one; otherwise
+# the spec plays the showcase sequence (multiple distinct teleport scenarios
+# stitched into a single GIF).
+if [ -n "$scenario" ]; then
+  export BOT_SCENARIO="$scenario"
+  echo "build-readme-header: capturing single scenario '$scenario' with Playwright…"
+else
+  unset BOT_SCENARIO
+  echo "build-readme-header: capturing showcase sequence with Playwright…"
+fi
 pnpm exec playwright test \
   --config "$(pwd)/screenshots/playwright.config.ts" \
   --project chromium

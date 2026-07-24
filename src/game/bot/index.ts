@@ -16,9 +16,11 @@ export {
 	captureFrames,
 	runScenario,
 } from './driver'
+export type { ShowcaseEntry } from './scenarios'
 export {
 	nearMissRewindScenario,
 	rotatingFieldScenario,
+	showcaseSequence,
 } from './scenarios'
 export type {
 	BotInstruction,

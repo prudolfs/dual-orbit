@@ -2,6 +2,8 @@
 
 ![Gameplay](docs/readme-header.gif)
 
+**Play it live:** <https://steady-puppy-680814.netlify.app/>
+
 > A deterministic orbital dodging game built with React, React Three Fiber and
 > TypeScript — ported from a Phaser original into a renderer-independent
 > simulation.
@@ -143,16 +145,24 @@ the reverse-engineered module boundaries and update order.
 The header animation is generated automatically: a Playwright capture spec
 boots the game, a deterministic bot driver replays curated inputs through the
 simulation, the running scene is screenshotted at chosen ticks, and ffmpeg
-assembles a looping GIF. Run from the repo root:
+assembles a looping GIF. By default the spec plays a *showcase sequence* —
+one teleport per gameplay place (a static pair, a rotating bar, a moving bar,
+a slow `angular_long` sweep, a mixed frame) — so consecutive GIF frames show
+distinct obstacle kinds rather than the same row at different orb angles.
+Run from the repo root:
 
 ```sh
-pnpm build
 scripts/build-readme-header.sh
 ```
 
+(The script's Playwright `webServer` builds the app itself with the bot
+bridge opted in; no separate `pnpm build` needed.)
+
 Output goes to `docs/readme-header.gif`. This is not an E2E coverage suite —
-the goal is to capture readable gameplay highlights (gauntlets, near-misses,
-rewinds) from a deterministic run. See [`docs/sample.md`](./docs/sample.md)
+the goal is to capture readable gameplay diversity from a deterministic run.
+Set `SCENARIO=rotatingFieldScenario|nearMissRewindScenario` (or another
+export from `src/game/bot/scenarios.ts`) to capture just one scenario
+instead of the showcase sequence. See [`docs/sample.md`](./docs/sample.md)
 for the full implementation plan.
 
 ---

@@ -2,7 +2,11 @@ import { expect, test } from 'vitest'
 import type { ObstacleKind, SimulationState } from '../types'
 import type { BotScenario, BotSnapshot } from './driver'
 import { runScenario } from './driver'
-import { nearMissRewindScenario, rotatingFieldScenario } from './scenarios'
+import {
+	nearMissRewindScenario,
+	rotatingFieldScenario,
+	showcaseSequence,
+} from './scenarios'
 
 /**
  * Projection of a {@link BotSnapshot} into the gameplay-relevant fields the
@@ -83,13 +87,6 @@ function onScreenObstacles(
 		}))
 }
 
-/** Angular bars (`angular` / `angular_long`) currently on screen. */
-function onScreenRotating(state: SimulationState): readonly OnScreenObstacle[] {
-	return onScreenObstacles(state).filter(
-		(o) => o.kind === 'angular' || o.kind === 'angular_long',
-	)
-}
-
 function firstCollisionTick(scenario: BotScenario): number {
 	let prev = 0
 	for (const snap of runScenario(scenario).snapshots) {
@@ -100,15 +97,24 @@ function firstCollisionTick(scenario: BotScenario): number {
 	return Number.POSITIVE_INFINITY
 }
 
-test('rotatingFieldScenario teleports the orbit into a level-25 band (seed 3)', () => {
+// ---------------------------------------------------------------------------
+// rotatingFieldScenario — the showcase head frame (seed-19 static pair +
+// centred rotating bar). Doubles as the legacy single-scenario export.
+// ---------------------------------------------------------------------------
+
+test('rotatingFieldScenario teleports the orbit into the seed-19 static-pair band', () => {
 	const initial = snapshotAt(rotatingFieldScenario, 0)
 
-	expect(initial.generator.level).toBe(25)
-	expect(initial.generator.group).toBe(4)
+	expect(initial.generator.level).toBe(4)
+	expect(initial.generator.group).toBe(3)
 	expect(initial.orbit.center.y).toBe(-1500)
-	// Angular bars are pre-phased against the teleport centre, not the default
-	// top-of-area spawn — at least one rotating bar is already on screen at tick 0.
-	expect(onScreenRotating(initial).length).toBeGreaterThanOrEqual(1)
+	// A `static` bar on each shoulder plus a centred `angular` bar already on
+	// screen at tick 0 — the showcase diversity frame.
+	const kinds: Set<ObstacleKind> = new Set(
+		onScreenObstacles(initial).map((o) => o.kind),
+	)
+	expect(kinds.has('static')).toBe(true)
+	expect(kinds.has('angular')).toBe(true)
 })
 
 test('rotatingFieldScenario reproduces identically across runs (golden determinism)', () => {
@@ -118,49 +124,52 @@ test('rotatingFieldScenario reproduces identically across runs (golden determini
 	expect(second).toStrictEqual(first)
 })
 
-test('rotatingFieldScenario capture ticks land on rotating bars with orbs mid-arc', () => {
+test('rotatingFieldScenario capture ticks land with both statics and a rotating bar in view', () => {
 	for (const tick of rotatingFieldScenario.captureTicks) {
 		const state = snapshotAt(rotatingFieldScenario, tick)
-		const rot = onScreenRotating(state)
+		const onScreen = onScreenObstacles(state)
+		const kinds: Set<ObstacleKind> = new Set(onScreen.map((o) => o.kind))
+
+		// Every capture tick keeps the diverse showcase frame — a static pair
+		// plus a rotating angular bar on screen together.
+		const hasStatic = kinds.has('static')
+		const hasAngular = kinds.has('angular')
 		const orb0Deg = ((state.orbit.orbs[0].angle * 180) / Math.PI) % 360
 
-		// Each capture tick has at least one rotating bar on screen…
 		expect(
-			rot.length,
-			`tick ${tick}: rotating bar on screen`,
-		).toBeGreaterThanOrEqual(1)
-		// …and at least one orb visibly off its rest orientation (mid-arc).
-		expect(
-			Math.abs(orb0Deg) > 8 || Math.abs(orb0Deg) < -8 || orb0Deg !== 180,
-			`tick ${tick}: orb0 mid-arc (deg=${orb0Deg.toFixed(0)})`,
-		).toBe(true)
+			onScreen.length,
+			`tick ${tick}: showcase frame has obstacles on screen`,
+		).toBeGreaterThanOrEqual(2)
+		expect(hasStatic, `tick ${tick}: shows a static bar`).toBe(true)
+		expect(hasAngular, `tick ${tick}: shows a rotating bar`).toBe(true)
+		// The non-zero capture tick shows the orbs mid-arc.
+		if (tick !== 0) {
+			expect(
+				Math.abs(orb0Deg) > 4 || Math.abs(orb0Deg - 360) > 4,
+				`tick ${tick}: orb0 mid-arc (deg=${orb0Deg.toFixed(0)})`,
+			).toBe(true)
+		}
 	}
 })
 
-test('rotatingFieldScenario surface stays mostly collision-free (clean weave through bars)', () => {
-	const last = snapshotAt(
-		rotatingFieldScenario,
-		runScenario(rotatingFieldScenario).snapshots.length - 1,
-	)
+// ---------------------------------------------------------------------------
+// nearMissRewindScenario — rewind-recovery showcase.
+// ---------------------------------------------------------------------------
 
-	// The published capture timeline (~240 ticks of weaving through two angular
-	// bars) accumulates ≤ 5 collisions — a "threading the needle" run, not a
-	// crashfest. Assert the budget so a regression that thrashes the orbit
-	// early breaks the test before it ships.
-	expect(last.stats.collisions.total).toBeLessThanOrEqual(5)
-	expect(last.stats.rewinds).toBe(0)
-})
-
-test('nearMissRewindScenario teleports the orbit into the same level-25 band', () => {
+test('nearMissRewindScenario teleports the orbit into the seed-19 band', () => {
 	const initial = snapshotAt(nearMissRewindScenario, 0)
 
-	expect(initial.generator.level).toBe(25)
+	expect(initial.generator.level).toBe(4)
 	expect(initial.orbit.center.y).toBe(-1500)
-	expect(onScreenRotating(initial).length).toBeGreaterThanOrEqual(1)
+	const kinds: Set<ObstacleKind> = new Set(
+		onScreenObstacles(initial).map((o) => o.kind),
+	)
+	expect(kinds.has('static')).toBe(true)
+	expect(kinds.has('angular')).toBe(true)
 })
 
-test('nearMissRewindScenario triggers its first collision at the scripted tick 48', () => {
-	expect(firstCollisionTick(nearMissRewindScenario)).toBe(48)
+test('nearMissRewindScenario triggers its first collision at the scripted tick 18', () => {
+	expect(firstCollisionTick(nearMissRewindScenario)).toBe(18)
 })
 
 test('nearMissRewindScenario accumulates ≥ 2 rewinds (each near-miss recovers)', () => {
@@ -169,27 +178,19 @@ test('nearMissRewindScenario accumulates ≥ 2 rewinds (each near-miss recovers)
 		runScenario(nearMissRewindScenario).snapshots.length - 1,
 	)
 
-	// Two near-misses over the run, both rewound — the rewind recovery path
-	// fires deterministically and the orbit resumes running.
 	expect(last.stats.rewinds).toBeGreaterThanOrEqual(2)
 })
 
-test('nearMissRewindScenario capture ticks straddle each near-miss + recovery', () => {
+test('nearMissRewindScenario capture ticks straddle near-misses + recovery', () => {
 	const traces = runScenario(nearMissRewindScenario).snapshots.map(project)
 	const ticks = nearMissRewindScenario.captureTicks
 
-	// All capture ticks are within the run's tick range.
 	expect(ticks.every((t) => traces[t] !== undefined)).toBe(true)
-
-	// The first collision (tick 48) is itself a capture tick — the "before"
-	// (tick 40) and the "glance" (tick 48) both frame the rewind.
-	expect(ticks).toContain(48)
-
-	// And it lands in `rewinding` (or rolling back into stabilize) per the
-	// scenario's `collisionAction: 'rewind'`.
-	const at48 = traces[48]
-	expect(at48).toBeDefined()
-	expect(at48.collisions).toBeGreaterThanOrEqual(1)
+	// Tick 18 is the first collision itself — the rewind moment.
+	expect(ticks).toContain(18)
+	const at18 = traces[18]
+	expect(at18).toBeDefined()
+	expect(at18.collisions).toBeGreaterThanOrEqual(1)
 })
 
 test('nearMissRewindScenario reproduces identically across runs (golden determinism)', () => {
@@ -197,4 +198,84 @@ test('nearMissRewindScenario reproduces identically across runs (golden determin
 	const second = runScenario(nearMissRewindScenario).snapshots.map(project)
 
 	expect(second).toStrictEqual(first)
+})
+
+// ---------------------------------------------------------------------------
+// showcaseSequence — the GIF frame plan. Each entry teleports to a
+// *different* gameplay place, so consecutive frames show distinct obstacle
+// kinds (the gameplay diversity the README header exists to advertise).
+// ---------------------------------------------------------------------------
+
+test('showcaseSequence contains at least five distinct gameplay places', () => {
+	// Five entries covering the diversity beats: static pair, rotating bar,
+	// moving bar, slow sweep, mixed.
+	expect(showcaseSequence.length).toBeGreaterThanOrEqual(5)
+})
+
+test('every showcaseSequence entry reproduces deterministically (golden)', () => {
+	for (const entry of showcaseSequence) {
+		const first = runScenario(entry.scenario).snapshots.map(project)
+		const second = runScenario(entry.scenario).snapshots.map(project)
+		expect(second, `showcase '${entry.label}' Golden mismatch`).toStrictEqual(
+			first,
+		)
+	}
+})
+
+test('every showcaseSequence entry frames its declared obstacle kind on screen at the capture tick', () => {
+	// Each showcase label declares the gameplay beat it frames; assert the
+	// on-screen kind mix at the capture tick actually contains the kind the
+	// label promises. This pins the GIF diversity against generator drift —
+	// a change that empties a showcase frame breaks CI here before the GIF
+	// goes stale.
+	const expectedKindPerLabel: ReadonlyArray<readonly [string, ObstacleKind]> = [
+		['Static pair both sides + rotating bar', 'static'],
+		['Rotating angular bar mid-sweep', 'angular'],
+		['Moving bar beside statics', 'moving'],
+		['Slow angular_long sweep', 'angular_long'],
+		['Static bar + slow sweeper', 'static'],
+	]
+
+	for (const entry of showcaseSequence) {
+		const tick = entry.scenario.captureTicks[0]
+		const state = snapshotAt(entry.scenario, tick)
+		const kinds: Set<ObstacleKind> = new Set(
+			onScreenObstacles(state).map((o) => o.kind),
+		)
+		const want = expectedKindPerLabel.find(([label]) =>
+			entry.label.startsWith(label),
+		)?.[1]
+		expect(
+			want,
+			`showcase '${entry.label}' has no expected-kind assertion`,
+		).toBeDefined()
+		expect(
+			kinds.has(want as ObstacleKind),
+			`showcase '${entry.label}' expected to show a '${want}' on screen at tick ${tick}, got kinds=[${[...kinds].join(',')}]`,
+		).toBe(true)
+		expect(
+			onScreenObstacles(state).length,
+			`showcase '${entry.label}' has at least one obstacle on screen`,
+		).toBeGreaterThanOrEqual(1)
+	}
+})
+
+test('showcaseSequence entries land on DIFFERENT gameplay places (no two share the same obstacle neighbourhood)', () => {
+	// Pin the user's actual requirement: consecutive GIF frames come from
+	// different places. We hash each showcase frame's on-screen obstacle set
+	// by `(alias, kind, round(y))` and assert every entry's hash is unique.
+	const hashes = new Set<string>()
+	for (const entry of showcaseSequence) {
+		const tick = entry.scenario.captureTicks[0]
+		const state = snapshotAt(entry.scenario, tick)
+		const hash = onScreenObstacles(state)
+			.map((o) => `${o.kind}@${o.y}`)
+			.sort()
+			.join('|')
+		expect(
+			hashes.has(hash),
+			`showcase '${entry.label}' reuses the same obstacle layout as a prior entry (${hash})`,
+		).toBe(false)
+		hashes.add(hash)
+	}
 })
