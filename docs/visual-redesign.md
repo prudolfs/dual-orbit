@@ -156,7 +156,7 @@ No custom shaders exist yet.
 
 ## Plan
 
-### Step 0 — Shared time uniform + clock
+### Step 0 — Shared time uniform + clock ✅
 
 Create `src/three/shaders/shared.ts`:
 
@@ -169,7 +169,7 @@ Add a tiny `<ShaderClock>` R3F component (placed once in the scene) that bumps
 `time.value += delta` each `useFrame`. Every TSL material that references
 `time` animates for free — no per-material refs, no `Set` registry.
 
-### Step 1 — Port the holographic material to TSL
+### Step 1 — Port the holographic material to TSL ✅
 
 Create `src/three/materials/holographic.ts` exporting a factory
 `createHolographicMaterial({ color, glitchStrength = 0.25 })`.
