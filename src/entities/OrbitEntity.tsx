@@ -65,8 +65,15 @@ export function OrbitEntity({ orbit, resolution }: OrbitEntityProps) {
 
 	return (
 		<group>
-			{/* Orbit-path ring — bright additive line tracing the orb rotation */}
-			<mesh position={center} rotation={[-Math.PI / 2, 0, 0]}>
+			{/*
+				Orbit-path ring — bright additive line tracing the orb rotation.
+				The orbs live in the XY play plane (the camera looks down -Z), so we
+				keep the ringGeometry in its native XY plane (no rotation) so it
+				reads as the path the orbs ride and faces the camera. The prior
+				`rotation={[-π/2,0,0]}` tilted it into the XZ floor — making it
+				appear edge-on / face-down to the camera.
+			*/}
+			<mesh position={center}>
 				<primitive object={ringGeometry} attach="geometry" />
 				<primitive object={ringMaterial} attach="material" />
 			</mesh>
@@ -110,8 +117,13 @@ function Orb({ orb, orbitCenter, resolution, phase }: OrbProps) {
 	)
 
 	// Materials created once per orb and disposed on unmount.
+	// `glitchStrength` is kept low here: orbs are ~0.3 world units in radius,
+	// so the earlier 0.25 world-space jitter displaced vertices by ~40% of
+	// the radius — making the sphere silhouette visibly bulge (wider than
+	// the halo + ring) and reading as fast/erratic motion. 0.06 stays
+	// readable while keeping the subtle energy shimmy.
 	const sphereMaterial = useMemo(
-		() => createHolographicMaterial({ color, glitchStrength: 0.25 }),
+		() => createHolographicMaterial({ color, glitchStrength: 0.06 }),
 		[color],
 	)
 	const coreMaterial = useMemo(
@@ -130,8 +142,11 @@ function Orb({ orb, orbitCenter, resolution, phase }: OrbProps) {
 
 	const sphereRef = useRef<Mesh>(null)
 	const discRef = useRef<Mesh>(null)
-	const discScale = orbRadius * 1.8 // slightly larger than the orb
-	const coreZ = 0.01 // tiny offset so additive core sits over sphere
+	// The visible holographic sphere silhouette is a touch larger than its
+	// base radius because of additive fresnel glow; size the halo to clearly
+	// envelope it (≈2.4× base radius) without overpowering the orb identity.
+	const discScale = orbRadius * 2.4
+	const coreZ = 0.02 // tiny offset so additive core sits over sphere
 
 	useFrame((state) => {
 		if (sphereRef.current) {

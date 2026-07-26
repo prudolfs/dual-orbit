@@ -199,6 +199,18 @@ Build with `three/tsl` nodes and `Fn`:
 
 > Note: `fresnel` helper exists in `three/addons/tsl`; we build it inline to
 > match the reference exactly and avoid an addon import.
+>
+> **Coordinate-space gotcha (hit during impl):** `material.positionNode` is
+> assigned back to `positionLocal` by `NodeMaterial.setupPosition` and then
+> transformed into world space by `modelWorldMatrix`. So `positionNode` MUST
+> be an **object-space** expression. The GLSL reference's `vPosition` (a
+> world-space `modelPosition` varying) is misleading as a guide — porting it
+> verbatim into `positionNode` makes the renderer double-transform the
+> vertices via `modelWorldMatrix`, exploding the mesh away from its group's
+> translation (the orbs visibly flew off their cores). In TSL we displace in
+> `positionLocal` for the assigned `positionNode`, and the fragment reads
+> `positionWorld` (which the renderer derives from the updated local
+> position) for the stripe coordinate.
 
 ### Step 1.5 — Switch the R3F renderer to `WebGPURenderer` ✅
 
@@ -241,24 +253,6 @@ three layers, stacked additively:
    - right orb **blue** (e.g. `#2f6fd8`) — replaces the current green
      `#2f8f83`.
    - subtle self-rotation (`rotation.y += delta * 0.3`).
-2. **Pulsing core** — a smaller bright sphere (or a billboarded point) at the
-   orb center whose brightness pulses with `time`:
-   - `coreSize` ≈ 0.35× orb radius.
-   - intensity = `0.6 + 0.4 * sin(time * speed + phase)`, `speed` tuned per
-     orb (or shared; offset phases so the two orbs don't beat in sync).
-   - color = a near-white tint of the orb identity color (lerp toward white by
-     ~0.5) so the core reads as the bright hotspot from the reference image.
-   - additive, `depthWrite:false`.
-3. **Back-disc / halo ring** — a flat circle placed behind the sphere facing
-   the camera (billboarded), slightly larger than the orb, additive, with a
-   soft radial falloff (bright at the rim or soft disc, TBD against the
-   reference). This is the "circle behind the orb" from the screenshot.
-   - Implement as a `planeGeometry` with a radial-falloff TSL fragment (e.g.
-     `strength = pow(1.0 - distance(uv, 0.5)*2, k)`) or a `ringGeometry`,
-     parented to the orb and rotated to face the camera each frame (or use a
-     `Billboard` from `@react-three/drei`).
-   - color = orb identity color, lower opacity so it glow-halos without
-     washing out the sphere.
 2. **Pulsing core** — a smaller bright sphere (or a billboarded point) at the
    orb center whose brightness pulses with `time`:
    - `coreSize` ≈ 0.35× orb radius.
@@ -326,12 +320,17 @@ orb component:
     (`RingGeometry(inner=R-thick, outer=R+thick, 128)`) is rebuilt from the
     live `orbit.radius` via `useMemo`, disposed on swap.
 - `src/entities/OrbitEntity.tsx` — renders a parent `<group>` with:
-  - the orbit-path ring (`rotation=[-π/2,0,0]` so the in-plane XY circle is
-    flat to the play field)
+  - the orbit-path ring (**no rotation** — keep the `ringGeometry` in its
+    native XY plane so it faces the camera; the orbs live in that XY play
+    plane, the camera looks down -Z. The earlier `rotation=[-π/2,0,0]` tilted
+    it into the XZ floor and made it read edge-on / face-down.)
   - the orbit-center holographic anchor sphere (dim `#3a5a78`, low
     `glitchStrength=0.05`, **no** pulsing core)
   - each orb as an `<Orb />` subcomponent with three children: billboarded
-    back-disc halo, holographic sphere (self-rotating), pulsing core.
+    back-disc halo (`discScale = orbRadius * 2.4`), holographic sphere
+    (self-rotating, `glitchStrength=0.06` — low because orbs are ~0.3 world
+    units in radius; the GLSL reference's 0.25 is fully half the sphere for a
+    ball this small and would visibly bulge the silhouette), pulsing core.
   - Materials are `useMemo`-created and disposed in `useEffect` cleanup to
     avoid leaks on game reset.
 - Colors live in `ORB_COLOR = { left:'#d84f3f', right:'#2f6fd8' }` as the
@@ -472,14 +471,6 @@ energy scene. The HUD is DOM, so this is pure CSS — no scene changes. Goals:
 
 ---
 
-## Open questions (to confirm before coding)
-
-- R3F↔TSL mount idiom: `<primitive object={nodeMaterial} attach="material" />`
-  vs inline `<meshBasicNodeMaterial>` — pick one and keep consistent. (Leaning
-  inline `<meshBasicNodeMaterial>` for orbs/obstacles since they share one
-  material factory.)
-
 ## Out of scope
 
 - Game logic, collision, rewind, scoring, level generation — unchanged.
-- HUD / DOM styling — unchanged.
