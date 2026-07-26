@@ -1,7 +1,6 @@
 import type Node from 'three/src/nodes/core/Node.js'
 import {
 	add,
-	assign,
 	cameraPosition,
 	dot,
 	Fn,
@@ -16,7 +15,9 @@ import {
 	smoothstep,
 	sub,
 	uniform,
+	varying,
 	vec2,
+	vec3,
 } from 'three/tsl'
 import {
 	AdditiveBlending,
@@ -32,11 +33,19 @@ import { time } from '../shaders/shared'
  * (== `threejs-journey/33-hologram-shaderl`) into TSL.
  *
  * Algorithm preserved 1:1:
- *   - vertex glitch: nudge modelPosition.x/z by (random2D - 0.5) * glitchFn,
+ *   - vertex glitch: nudge position.x/z by (random2D - 0.5) * glitchFn,
  *     where glitchFn is the time-driven multi-sine smoothed to [0,1] * strength
- *   - fragment: vertical scrolling stripes (mod/pow) over positionWorld.y
+ *   - fragment: vertical scrolling stripes (mod/pow) over the displaced
+ *     world position's y
  *   - fresnel from cameraPosition vs world normal (flipped on back faces)
  *   - smoothstep falloff; final alpha = (stripes*fresnel + fresnel*1.25)*falloff
+ *
+ * TSL mapping:
+ *   - Vertex displacement is computed in `displaceFn`, which is set as the
+ *     material's `positionNode` (runs at the vertex stage). The displaced
+ *     position is forwarded to the fragment stage via `varying(vPosition)`.
+ *   - Fragment alpha computed in `alphaFn`, which reads `vPosition` — matching
+ *     the GLSL reference's `vPosition` varying (post-glitch modelPosition.xyz).
  *
  * Render flags match the reference:
  *   transparent, depthWrite:false, AdditiveBlending, DoubleSide.
@@ -52,6 +61,25 @@ import { time } from '../shaders/shared'
 const random2D = (value: Node<'vec2'>) =>
 	fract(sin(dot(value, vec2(12.9898, 78.233))).mul(43758.5453123))
 
+// Computes the V-quarters multi-sine glitch factor and the x/z offsets that
+// displace the vertex. Pure (does not mutate inputs). Returns vec2(x, z).
+const glitchOffset = Fn(
+	([pos, strength]: [Node<'vec3'>, Node<'float'>]): Node<'vec2'> => {
+		const glitchTime = sub(time, pos.y)
+		let glitch = add(
+			add(sin(glitchTime), sin(mul(glitchTime, 3.45))),
+			sin(mul(glitchTime, 8.76)),
+		)
+		glitch = glitch.div(3)
+		glitch = smoothstep(0.3, 1.0, glitch)
+		glitch = glitch.mul(strength)
+
+		const offsetX = sub(random2D(add(pos.xz, time)), 0.5).mul(glitch)
+		const offsetZ = sub(random2D(add(pos.zx, time)), 0.5).mul(glitch)
+		return vec2(offsetX, offsetZ)
+	},
+)
+
 export type HolographicOptions = {
 	readonly color: Color | string | number
 	readonly glitchStrength?: number
@@ -64,12 +92,11 @@ const uniformGlitchType = uniform(0)
 type GlitchUniform = typeof uniformGlitchType
 
 /**
- * Per-material glitch strength injected into the alpha Fn.
- *
- * `Fn` closures capture node references, not JS values, so we rebuild this
- * uniform per factory call with the caller's value; the material's
- * `opacityNode` graph references that specific uniform node, whose `value`
- * is mutable for live tuning (e.g. boost on colliding obstacles).
+ * Per-material glitch strength injected into both the vertex displace Fn and
+ * the fragment alpha Fn. `Fn` closures capture node references, not JS values,
+ * so we rebuild this uniform per factory call with the caller's value; both
+ * Fns reference that specific uniform node, whose `value` is mutable for live
+ * tuning (e.g. boost on colliding obstacles).
  */
 export type HolographicMaterial = MeshBasicNodeMaterial & {
 	glitchStrength: GlitchUniform
@@ -81,30 +108,27 @@ export function createHolographicMaterial({
 }: HolographicOptions): HolographicMaterial {
 	const glitchUniform = uniform(glitchStrength)
 
+	// Stage 1 — vertex displacement. `positionNode` runs at the vertex stage.
+	// We compute the world-space glitch offsets on `positionWorld` and add them
+	// to x/z, producing the final vertex position. We forward the displaced
+	// position to the fragment stage via `varying(vPosition)` so the alpha Fn
+	// reads the post-glitch coordinate (matching the GLSL reference's
+	// `vPosition = modelPosition.xyz`).
+	const vPosition = varying(
+		Fn((): Node<'vec3'> => {
+			const pos = positionWorld.toVar()
+			const offset = glitchOffset(pos, glitchUniform)
+			return vec3(pos.x.add(offset.x), pos.y, pos.z.add(offset.y))
+		})(),
+		'vPosition',
+	)
+
+	// Stage 2 — fragment alpha. Reads `vPosition`, `normalLocal` (flipped on
+	// back faces via `faceDirection`), and `cameraPosition` for the fresnel
+	// term.
 	const alpha = Fn((): Node<'float'> => {
-		// --- Vertex displacement (glitch) --------------------------------------
-		// Reference:
-		//   glitchTime = uTime - modelPosition.y
-		//   g = (sin(t)+sin(3.45t)+sin(8.76t))/3
-		//   g = smoothstep(0.3,1.0, g) * strength
-		//   pos.x += (random2D(pos.xz + uTime) - 0.5) * g
-		//   pos.z += (random2D(pos.zx + uTime) - 0.5) * g
-		const pos = positionWorld.toVar()
-		const glitchTime = sub(time, pos.y)
-		let glitch = add(
-			add(sin(glitchTime), sin(mul(glitchTime, 3.45))),
-			sin(mul(glitchTime, 8.76)),
-		)
-		glitch = glitch.div(3)
-		glitch = smoothstep(0.3, 1.0, glitch)
-		glitch = glitch.mul(glitchUniform)
+		const pos = vPosition.toVar()
 
-		const offsetX = sub(random2D(add(pos.xz, time)), 0.5).mul(glitch)
-		const offsetZ = sub(random2D(add(pos.zx, time)), 0.5).mul(glitch)
-		assign(pos.x, pos.x.add(offsetX))
-		assign(pos.z, pos.z.add(offsetZ))
-
-		// --- Fragment ----------------------------------------------------------
 		// normal flipped on back faces:
 		//   normal = normalize(vNormal); if (!gl_FrontFacing) normal *= -1
 		// faceDirection is +1 front / -1 back, so mul flips the sign correctly.
@@ -132,6 +156,7 @@ export function createHolographicMaterial({
 	material.depthWrite = false
 	material.blending = AdditiveBlending
 	material.side = DoubleSide
+	material.positionNode = vPosition
 	material.opacityNode = alpha
 
 	const mat = material as HolographicMaterial

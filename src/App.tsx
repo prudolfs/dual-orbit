@@ -8,6 +8,7 @@ import {
 import type { SimulationState } from './game/types'
 import { useKeyboardInput } from './hooks/useKeyboardInput'
 import { GameScene } from './scene/GameScene'
+import { createWebGPURenderer, RenderLoop } from './three/WebGPUCanvas'
 import './App.css'
 
 function App() {
@@ -44,7 +45,7 @@ function App() {
 			>
 				<Canvas
 					camera={{ position: [0, 2.5, 12], fov: 48, near: 0.1, far: 1000 }}
-					gl={{ antialias: true }}
+					gl={createWebGPURenderer}
 					dpr={[1, 2]}
 				>
 					<SimulationTicker
@@ -54,6 +55,7 @@ function App() {
 						onSimulationChange={setSimulation}
 					/>
 					<GameScene simulation={simulation} />
+					<RenderLoop />
 				</Canvas>
 				<div className="hud">
 					<div>

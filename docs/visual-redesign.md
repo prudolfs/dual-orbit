@@ -48,7 +48,7 @@ The *algorithms*, not the GLSL syntax:
    - a **glowing disc/circle behind the sphere** (a billboarded ring/backplate
      additive layer).
 
-   > Vibe reference only: `.temp/001.png` (an original-game screenshot) sets
+   > Vibe reference only: `.temp/screenshot-001.png` (an original-game screenshot) sets
    > the **colors/mood** — energy orbs as bright cores with a soft circular
    > halo on a dark, contrasting background. It is **not** a pixel-spec to
    > reproduce 1:1; we keep original orb colors and aim for that look/feel.
@@ -200,7 +200,37 @@ Build with `three/tsl` nodes and `Fn`:
 > Note: `fresnel` helper exists in `three/addons/tsl`; we build it inline to
 > match the reference exactly and avoid an addon import.
 
-### Step 2 — Render orbs as holographic energy spheres
+### Step 1.5 — Switch the R3F renderer to `WebGPURenderer` ✅
+
+TSL `NodeMaterial`s are only renderable through `three/webgpu`'s
+`WebGPURenderer` — the stock `THREE.WebGLRenderer` cannot compile node
+materials, so R3F's default renderer must be replaced before Step 2.
+
+- Create `src/three/WebGPUCanvas.tsx` exporting:
+  - `createWebGPURenderer(params)` — async factory passed to `<Canvas
+    gl={createWebGPURenderer}>`. R3F calls it with `{ canvas, antialias,
+    alpha, ... }` and installs the returned renderer as `state.gl`. We pass
+    `forceWebGL: true` to keep the WebGL2 backend (no WebGPU device needed,
+    maximum compatibility) while still gaining TSL `NodeMaterial` support. The
+    factory `await`s `renderer.init()` before returning.
+  - `<RenderLoop />` — a single component mounted inside the `<Canvas>`. It
+    registers a `useFrame` with `priority={1}`. R3F treats any priority > 0 as
+    "rendering is the subscriber's responsibility" and skips its own
+    synchronous `gl.render(scene, camera)`; we then call
+    `gl.renderAsync(scene, camera)` (the async drive path for `WebGPURenderer`).
+    All other `useFrame` subscribers (ShaderClock, CameraController,
+    SimulationTicker) still run every frame as usual at priority 0.
+- In `App.tsx`, set `gl={createWebGPURenderer}` and add `<RenderLoop />` as
+  the last child of `<Canvas>`.
+
+- TS note: R3F's `DefaultGLProps.canvas` (= `HTMLCanvasElement | OffscreenCanvas`)
+  resolves to the DOM lib `OffscreenCanvas`, while `@types/three`'s
+  `WebGPURendererParameters.canvas` resolves to the `@types/offscreencanvas`-
+  augmented `OffscreenCanvas` — TS cannot reconcile the two stubs. We narrow
+  the canvas to `HTMLCanvasElement` (R3F always passes a real DOM `<canvas>`),
+  which sidesteps the interface mismatch without `any`.
+
+### Step 2 — Render orbs as holographic energy spheres ✅
 
 Edit `src/entities/OrbitEntity.tsx`. Each orb becomes a **group** of up to
 three layers, stacked additively:
@@ -278,6 +308,38 @@ orbs/obstacles.
 
 > TSL note: the back-disc billboard can read `cameraPosition` to face the
 camera, or simply use drei's `<Billboard>` wrapper — keep it simple.
+
+**Implementation (Step 2).** Done with two helper files plus the reworked
+orb component:
+
+- `src/three/materials/energy.ts` — three factories:
+  - `createPulsingCoreMaterial({ color, speed=2.5, phase=0 })` — additive
+    `MeshBasicNodeMaterial` whose `opacityNode` pulses
+    `0.6 + 0.4 * sin(time*speed + phase)` from the shared `time` uniform.
+    `speed`/`phase` are exposed `UniformNumber`s for live tuning; the two orbs
+    get offsets `0` and `π/2` so they don't beat in sync.
+  - `createBackDiscMaterial({ color, intensity=0.5 })` — additive plane whose
+    `opacityNode = pow(1.0 - distance(uv,0.5)*2, 4) * intensity`. Caller
+    billboards the mesh by copying `state.camera.quaternion` each frame.
+  - `createOrbitRingMaterial(color='#dce6ff')` — bright additive constant for
+    the thin `ringGeometry` that traces the orb path. The geometry
+    (`RingGeometry(inner=R-thick, outer=R+thick, 128)`) is rebuilt from the
+    live `orbit.radius` via `useMemo`, disposed on swap.
+- `src/entities/OrbitEntity.tsx` — renders a parent `<group>` with:
+  - the orbit-path ring (`rotation=[-π/2,0,0]` so the in-plane XY circle is
+    flat to the play field)
+  - the orbit-center holographic anchor sphere (dim `#3a5a78`, low
+    `glitchStrength=0.05`, **no** pulsing core)
+  - each orb as an `<Orb />` subcomponent with three children: billboarded
+    back-disc halo, holographic sphere (self-rotating), pulsing core.
+  - Materials are `useMemo`-created and disposed in `useEffect` cleanup to
+    avoid leaks on game reset.
+- Colors live in `ORB_COLOR = { left:'#d84f3f', right:'#2f6fd8' }` as the
+  project's single source of truth (the HUD accent system, Step 6b, mirrors
+  these).
+- `src/scene/GameScene.tsx` — backgrounds now `#05060d` (dark) so additive
+  holographic layers read; `<ShaderClock />` mounted so the shared `time`
+  uniform advances each frame before any orb fragment is evaluated.
 
 ### Step 3 — Render obstacles as holographic boxes
 
