@@ -42,6 +42,23 @@ export async function createWebGPURenderer(
 		forceWebGL: true,
 	})
 	await renderer.init()
+
+	/*
+	 * `WebGPURenderer` on the WebGL backend does **not** honour R3F's
+	 * `<color attach="background">` (which mutates `scene.background`) for
+	 * its clear color — the WebGL surface retains its own `gl.clearColor`,
+	 * and with `alpha` true the framebuffer clears transparent, letting the
+	 * light CSS behind the canvas (`.game-stage` `#f6f7f2`) bleed in. That
+	 * light background washes out the additive holographic materials (their
+	 * contribution `color * alpha` adds almost nothing to near-white).
+	 *
+	 * So pin the renderer clear color to the same dark scene backdrop
+	 * (`#05060d`) used by `GameScene.tsx`'s `<color attach="background">`.
+	 * `setClearColor` also forces `alpha=1`, so the canvas is opaque-dark and
+	 * additive reads cleanly. `GameScene.tsx` still keeps the `<color>` for
+	 * any future WebGPU device path; keeping the two in sync is fine.
+	 */
+	renderer.setClearColor('#05060d', 1)
 	return renderer
 }
 

@@ -113,20 +113,49 @@ export function createBackDiscMaterial({
 }
 
 // --- Orbit-path ring --------------------------------------------------------
-// A thin `ringGeometry` traced along the orbs' rotation path, bright so the
-// orbit reads against the dim galaxy. Pure additive constant (no animation).
-export function createOrbitRingMaterial(
-	color: Color | string | number = '#dce6ff',
-): MeshBasicNodeMaterial {
+// A thin **torus** tracing the orbs' rotation path. We switched from a flat
+// `ringGeometry` to a torus so the orbit reads as a real 3D track the orbs
+// ride (the orbs straddle the tube), instead of a flat disc drawn on top.
+// It writes depth (`depthWrite:true`) and the orb spheres also write depth, so
+// the orbs occlude the back half of the tube and the front half of the tube
+// occludes the back of the orbs — true 3D "orb sitting on the ring".
+// It glows: a steady additive base plus a soft pulse along `time` so the
+// ring feels alive without strobing. `intensity` is a uniform for live tuning.
+export type OrbitRingMaterial = MeshBasicNodeMaterial & {
+	intensity: UniformNumber
+}
+
+export function createOrbitRingMaterial({
+	color = '#dce6ff',
+	intensity = 1.0,
+}: {
+	color?: Color | string | number
+	intensity?: number
+} = {}): OrbitRingMaterial {
+	const uIntensity = uniform(intensity)
+
+	// Steady base glow + a gentle 25% pulse. Keeps the ring visible at all
+	// times (it's the gameplay-readability anchor) while feeling energetic.
+	const alpha = Fn((): Node<'float'> => {
+		const base = float(0.85)
+		const pulse = sin(time.mul(2.0)).mul(0.5).add(0.5).mul(0.25)
+		return base.add(pulse).mul(uIntensity)
+	})()
+
 	const material = new MeshBasicNodeMaterial()
 	material.color = new Color(color)
 	material.transparent = true
-	material.depthWrite = false
+	// Write + test depth so the torus is a real 3D tube: the orbs (which also
+	// write depth) straddle it and occlude the half of the tube behind them,
+	// while the front half of the tube occludes the back of the orbs. Without
+	// depthWrite the flat-on-paper ring just drew *over* every orb.
+	material.depthWrite = true
+	material.depthTest = true
 	material.blending = AdditiveBlending
 	material.side = DoubleSide
-	// ringGeometry is a flat strip in XY; we keep it opaque (modulated by ring
-	// geometry's own radial alpha — none here, so flat constant alpha 1). The
-	// geometry's thinness gives the "line" look.
-	material.opacityNode = float(1.0)
-	return material
+	material.opacityNode = alpha
+
+	const mat = material as OrbitRingMaterial
+	mat.intensity = uIntensity
+	return mat
 }

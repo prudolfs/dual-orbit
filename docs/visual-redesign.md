@@ -172,9 +172,7 @@ Add a tiny `<ShaderClock>` R3F component (placed once in the scene) that bumps
 ### Step 1 — Port the holographic material to TSL ✅
 
 Create `src/three/materials/holographic.ts` exporting a factory
-`createHolographicMaterial({ color, glitchStrength = 0.25 })`.
-
-Build with `three/tsl` nodes and `Fn`:
+`createHolographicMaterial({ color, glitchStrength = 0.25 })`.Build with `three/tsl` nodes and `Fn`:
 
 - `random2D = Fn(([v]) => fract(sin(dot(v, vec2(12.9898, 78.233))) * 43758.5453123))`
 - Vertex displacement (glitch): operate on `positionLocal`, reassign
@@ -191,6 +189,20 @@ Build with `three/tsl` nodes and `Fn`:
   `holographic = stripes.mul(fresnel).add(fresnel.mul(1.25)).mul(falloff)`.
   Output `assign(material.color, uColor)` and `assign(material.opacity,
   holographic)` (or feed via `MeshBasicNodeMaterial` color/opacity/alpha nodes).
+- **`baseFill` option (added in Step 3):** the pure reference fresnel alpha is
+  0 at face-on (fresnel=0 → alpha=0) — so flat surfaces perpendicular to the
+  camera render as nothing but a thin rim. That's correct for **spheres**
+  (the silhouette sweeps 0→1 across the disc producing a bright mid-radius
+  band) but **deadly for flat box faces** (their whole front is uniform
+  normal+z, deleted by the fresnel). The factory therefore also accepts a
+  `baseFill` (`0` by default, ~0.7–2.0 for obstacle boxes) and adds a
+  view-independent scrolling-scanline body fill:
+  `bodyFill = stripePos.mul(0.5)` (DC ~0.25 + stripe modulation), so a
+  flat panel front-on reads as a holographic field with moving scanlines,
+  not empty space. Orbs pass `baseFill = 0` so they keep the pure shell.
+- **`intensity` option:** overall brightness multiplier on the final alpha
+  `(bodyFill + holographic) * intensity`. Callers scale the whole effect per
+  instance — orbs ~1.4, obstacles 1.0–2.0, collisions boosted.
 - Wrap as a `MeshBasicNodeMaterial` (or `MeshStandardNodeMaterial` with
   emissive) with flags
   `transparent:true, depthWrite:false, blending:Additive, side:DoubleSide`.
@@ -241,6 +253,19 @@ materials, so R3F's default renderer must be replaced before Step 2.
   augmented `OffscreenCanvas` — TS cannot reconcile the two stubs. We narrow
   the canvas to `HTMLCanvasElement` (R3F always passes a real DOM `<canvas>`),
   which sidesteps the interface mismatch without `any`.
+
+- **Renderer clear color (hit during impl):** `WebGPURenderer` on the
+  WebGL backend does **not** honour R3F's `<color attach="background">`
+  (which mutates `scene.background`) for its true clear color — the WebGL
+  surface keeps its own `gl.clearColor` (which defaults to opaque black with
+  `alpha:false`, transparent with `alpha:true`), so when R3F retains
+  `alpha:true` the framebuffer clears transparent and the light CSS behind
+  the canvas (`.game-stage` `#f6f7f2`) bleeds through. That light backdrop
+  washes out the additive holographic materials — their contribution
+  `color * alpha` adds nothing to near-white. The factory therefore pins
+  `renderer.setClearColor('#05060d', 1)` so the canvas is opaque-dark and
+  additive reads cleanly. `GameScene.tsx` still keeps the `<color>` for any
+  future WebGPU device path; keeping both in sync is fine.
 
 ### Step 2 — Render orbs as holographic energy spheres ✅
 
@@ -340,71 +365,119 @@ orb component:
   holographic layers read; `<ShaderClock />` mounted so the shared `time`
   uniform advances each frame before any orb fragment is evaluated.
 
-### Step 3 — Render obstacles as holographic boxes
+### Step 3 — Render obstacles as holographic boxes ✅
 
-Edit `src/entities/ObstacleEntity.tsx`:
+Implemented in `src/entities/ObstacleEntity.tsx`.
 
-- Replace `meshStandardMaterial` with the holographic node material.
-- Per-kind `color` (reuse `getObstacleColor` palette):
-  - `static` → `#242935`
-  - `moving` → `#7f5ab6`
-  - `angular` → `#394c79`
-  - `angular_long` → `#c46d3a`
-  - colliding → `#f5c84b` (and/or boost `glitchStrength`)
-- Boost `glitchStrength` for `moving` and colliding obstacles to telegraph
-  energy; keep it low for `static`. Because it's a uniform, tuning is a prop.
+- Replaced `meshStandardMaterial` with the holographic node material from
+  Step 1 (mounted via `<primitive object={material} attach="material" />`).
+- Per-kind `color` feeding the additive holographic material. With the
+  `baseFill` body scanline + fresnel rim both scaled by `intensity`, colors
+  are kept **bright / saturated** (mirroring the reference demo's bright
+  `#70c1ff`) so they read against the dark `#05060d` clear — additive can't
+  brighten a dim color, so the channels themselves must be luminous:
+  - `static` → `#5a7090` (dim-mid cool slate — quietest hull)
+  - `moving` → `#a070e0` (warm purple)
+  - `angular` → `#7090c8` (mid blue)
+  - `angular_long` → `#e09040` (warm orange)
+  - colliding → `#ffdc60` (yellow collision highlight)
+- Per-kind `baseFill` (view-independent scanline body fill — see Step 1's
+  `HolographicOptions.baseFill`). The pure reference fresnel alpha is 0 at
+  face-on, so flat box faces perpendicular to the camera would render as
+  nothing but a thin rim; the body fill renders the front face as a
+  scrolling-stripe holographic panel:
+  - `static` → `0.7`
+  - `angular` → `0.9`
+  - `angular_long` → `1.0`
+  - `moving` → `1.2`
+  - colliding → `2.0`
+- Per-kind `intensity` (overall brightness, scales both the body fill and
+  the fresnel rim band — stays under the orbs which use `1.4` on their shell):
+  - `static` → `1.0`
+  - `angular` → `1.2`
+  - `angular_long` → `1.3`
+  - `moving` → `1.5`
+  - colliding → `2.0`
 - Obstacles use `boxGeometry`; the holographic shader reads `position`/`normal`
   attributes generically — no geometry change needed.
-- These meshes are additive/emissive; orbital lights become optional (see
-  Step 6).
+- Per-kind `glitchStrength` (uniform, tunable) — boxes are big (a few world
+  units across) so, unlike orbs (radius ~0.3), the GLSL reference's 0.25-scale
+  jitter reads as energy, not a silhouette explosion:
+  - `static` → `0.04` (near-silent)
+  - `angular` → `0.18`
+  - `angular_long` → `0.2`
+  - `moving` → `0.25`
+  - colliding → `0.4` (boosted to telegraph danger)
+- One `HolographicMaterial` instance per obstacle (per-instance uniform),
+  `useMemo`'d on `[color, glitchStrength, intensity, baseFill]` and disposed
+  on unmount to avoid leaking node materials on game reset / obstacle prune.
+- Confirmed by Step 2: the holographic material's `positionNode` is now
+  object-space, so the double-transform bug does not affect these big boxes
+  either; the glitch stays local to the box.
 
-### Step 4 — Galaxy background points (TSL)
+**Lights dropped early (folded from Step 6).** With orbs + orbit-layer +
+obstacles all on `MeshBasicNodeMaterial` (which ignores lighting), the
+`ambientLight`/`directionalLight`s were no-ops. Removed in `GameScene.tsx`
+now; Step 6 no longer needs to revisit this.
 
-Create `src/scene/GalaxyBackground.tsx`:
+### Step 4 — Galaxy background points ✅
 
-1. Geometry generator modeled on journey 30's `generateGalaxy`, filling typed
-   arrays for attributes `position`, `aRandomness` (vec3), `color` (vec3),
-   `aScale` (float). Parameters:
-   - `count` (start ~20k–60k, tune for perf)
-   - `radius`, `branches`, `spin`, `randomness`, `randomnessPower`
-   - `insideColor` / `outsideColor` (energy palette pairing with the holographic
-     orbs — e.g. cool blue→cyan, or magenta→blue)
-2. TSL `PointsNodeMaterial` (`depthWrite:false, blending:AdditiveBlending,
-   vertexColors:true`), uniforms `uSize` (sized by `gl.getPixelRatio()`),
-   global `time` from Step 0.
-3. Vertex nodes: read `positionWorld`/`positionLocal`;
-   `angle = atan(pos.x, pos.z)`; `dist = length(pos.xz)`;
-   `angle += (1.0/dist).mul(time)`; reassign `pos.x`/`pos.z`;
-   add `attribute('aRandomness','vec3')`; size =
-   `uSize.mul(aScale).mul(clamp(modelViewPosition.z.negate().reciprocal()))`
-   (i.e. the `1.0 / -viewPosition.z` perspective term).
-4. Fragment nodes: `strength = pow(1.0 - distance(pointCoord, vec2(0.5)), 10.0)`;
-   `rgb = mix(vec3(0), vertexColor, strength)`; additive.
-5. Update nothing per-frame except the global `time` uniform (Step 0).
+Created `src/scene/GalaxyBackground.tsx` — port of `threejs-journey/30-animated-galaxy/`.
 
-### Step 5 — Lock the galaxy to the camera
+**Why stock `PointsMaterial` (with an `onBeforeCompile` patch) rather than
+the original plan of a TSL `PointsNodeMaterial`?** The WebGL fallback
+backend of `WebGPURenderer` (`forceWebGL:true`) hardcodes
+`gl_PointSize = 1.0` in `GLSLNodeBuilder._getGLSLVertexCode` — any
+`PointsNodeMaterial` `sizeNode` is ignored and every point renders as a
+sub-pixel speck. 100k 1-pixel points spread across a 36-unit disc eyeball
+to nothing (we verified this). A stock `PointsMaterial` does **not** go
+through `GLSLNodeBuilder`, so the renderer honors its standard
+`gl_PointSize` injection — points actually render at the requested
+world-space size with perspective attenuation. The lost animation
+(no per-vertex `positionNode` spin) is replaced by a `useFrame`
+Z-rotation of the whole `<points>` object on its disc-normal axis
+(functionally identical visual — inner-arm shear).
 
-Requirement: galaxy "always in the background, locked to camera movement" —
-i.e. visible regardless of where the camera pans.
+Implementation:
 
-Approach (pick one, recommend A):
+1. `BufferGeometry` populated journey-30-style: per point
+   `branchAngle = ((i % branches)/branches)*τ; r = rand*radius`;
+   `position = (cos*bAngle*r + randX, sin*bAngle*r + randY, randZ)`;
+   vertex `color = insideColor.lerp(outsideColor, r/radius)`.
+   Disc lies in the **XY plane** (normal = +Z) — the camera looks down -Z
+   at the play field (z=0), so an XZ disc would render edge-on (a thin
+   line). XY face-on reads as the journey-30 tilted-camera nebula.
+2. `PointsMaterial({ size:1.0, sizeAttenuation:true, vertexColors:true,
+   transparent:true, depthWrite:false, blending:AdditiveBlending })`
+   with an `onBeforeCompile` patch that multiplies `diffuseColor.rgb` by
+   `smoothstep(0.5, 0.18, distance(gl_PointCoord, vec2(0.5)))` — round soft
+   discs instead of chunky squares (AdditiveBlending ignores fragment
+   alpha, so the RGB must be masked, not just `a`).
+3. Default knobs: `count=250000, radius=26, branches=4, randomness=1.5,
+   randomnessPower=2.2, insideColor=#ff6030, outsideColor=#1b3984, size=1.0`.
+   Tuned by Playwright pixel probing until the corners (which had been pure
+   black `rgb(0,0,1)` with `PointsNodeMaterial`) carry `5–15%` bright
+   pixels (avg `~200`, max `~765`) — the whole frame reads as a nebula
+   with spiral arms, dense core (avg `~323`), and visible stars even at the
+corners.
+4. `<GalaxyBackground />` is mounted in `GameScene.tsx` between
+   `<ShaderClock />` and `<CameraController />` (Step 6 integration).
 
-- **A. Parent the galaxy `Points` to the camera.** Add the points object as a
-  child of the camera so they move with it. Place the galaxy large and centered
-  at a fixed offset in camera space (e.g. `[0, 0, -bigZ]`) so it sits behind the
-  play field; `camera.far` is already `1000`. Galaxy swirls around its own
-  center, giving a clean "always behind / parallax" effect.
-- **B. Follow script.** Each `useFrame`, `galaxy.position.copy(camera.position)`
-  plus a fixed look-axis offset. Equivalent to A but matrix-updated manually.
+### Step 5 — Lock the galaxy to the camera ✅
 
-Either way: galaxy radius comfortably larger than the play field extent (so the
-camera never reaches the edge), `depthWrite:false` + additive so it never
-occludes orbs/obstacles.
+**Approach B (follow script).** In `useFrame` each frame: copy
+`camera.position`, then offset `position.z -= 18` ≈ 18 units behind the play
+field; keep `quaternion.identity()` so the disc's +Z normal stays aligned
+with world Z (the camera pitches slightly downward toward the play field,
+but we don't want the galaxy tilted with it). Spin is a
+`rotation.z += spinSpeed * delta`.
 
-Implementation detail: with R3F, parenting to the camera can be done by
-grabbing the camera via `useThree` and `camera.add(points)` in an effect, or by
-rendering `primitive` inside a camera-attached group — confirm the cleanest
-R3F pattern during impl.
+With `radius=26` the disc extends well past the visible field at any camera
+pan — the camera (at `z=12`) is actually inside the disc's z-extent (disc
+spans `z=-32…20` world), which is what produces the corner-filling nebula
+rather than a distant tiny galaxy.
+
+`depthWrite:false` + `AdditiveBlending` → never occludes orbs/obstacles.
 
 ### Step 6 — Integration & lighting cleanup
 
@@ -412,12 +485,12 @@ In `src/scene/GameScene.tsx`:
 
 - Set a dark clear/background color (e.g.
   `<color attach="background" args={['#05060a']} />`) so additive holographic +
-  galaxy pop.
+  galaxy pop. (Already `#05060d` since Step 2.)
 - Insert `<GalaxyBackground />` before the gameplay `<group>`.
-- Insert `<ShaderClock />` (Step 0) once.
-- Keep a low `ambientLight` only if any non-holographic elements remain (HUD is
-  DOM, so lights can likely be dropped entirely once orbs/obstacles are
-  holographic). Decide after Step 2/3.
+- Insert `<ShaderClock />` (Step 0) once. (Already mounted since Step 2.)
+- Lights: already dropped in Step 3 — every gameplay mesh is a
+  `MeshBasicNodeMaterial` (holographic/energy) that ignores lighting; HUD is
+  DOM. No lights to revisit here.
 
 ### Step 6b — Cyberpunk HUD
 

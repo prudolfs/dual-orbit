@@ -3,6 +3,7 @@ import { OrbitEntity } from '../entities/OrbitEntity'
 import type { SimulationState } from '../game/types'
 import { ShaderClock } from '../three/ShaderClock'
 import { CameraController } from './CameraController'
+import { GalaxyBackground } from './GalaxyBackground'
 
 type GameSceneProps = {
 	readonly simulation: SimulationState
@@ -12,11 +13,15 @@ export function GameScene({ simulation }: GameSceneProps) {
 	return (
 		<>
 			{/* Dark backdrop so additive holographic/energy layers read. */}
+			{/* No lights: every gameplay mesh is a `MeshBasicNodeMaterial`
+			    (holographic/energy) which ignores lighting entirely. The
+			    scene is fully emissive/additive against this dark clear color. */}
 			<color attach="background" args={['#05060d']} />
-			<ambientLight intensity={0.8} />
-			<directionalLight position={[3, 6, 8]} intensity={1.4} />
-			<directionalLight position={[-5, 2, 5]} intensity={0.5} />
 			<ShaderClock />
+			{/* Animated galaxy point cloud — locked behind the play field, additive
+			    so it never occludes orbs/obstacles. Rendered before the gameplay
+			    group so its transparent additive points sort correctly behind. */}
+			<GalaxyBackground />
 			<CameraController simulation={simulation} />
 			<group>
 				{simulation.obstacles.map((obstacle) => (
