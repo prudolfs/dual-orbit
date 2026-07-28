@@ -49,6 +49,7 @@ export function ObstacleEntity({ obstacle, resolution }: ObstacleEntityProps) {
 	// the collision highlight reads across the whole frame, not just the
 	// rim band.
 	const baseFill = getObstacleBaseFill(obstacle)
+	const stripeFrequency = getObstacleStripeFrequency(obstacle)
 
 	const material = useMemo(
 		() =>
@@ -57,8 +58,9 @@ export function ObstacleEntity({ obstacle, resolution }: ObstacleEntityProps) {
 				glitchStrength,
 				intensity,
 				baseFill,
+				stripeFrequency,
 			}),
-		[color, glitchStrength, intensity, baseFill],
+		[color, glitchStrength, intensity, baseFill, stripeFrequency],
 	)
 	useEffect(() => () => material.dispose(), [material])
 
@@ -94,13 +96,13 @@ function getObstacleColor(obstacle: ObstacleState): string {
 
 	switch (obstacle.kind) {
 		case 'moving':
-			return '#a070e0'
+			return '#c088ff'
 		case 'angular':
-			return '#7090c8'
+			return '#5ad8d2'
 		case 'angular_long':
-			return '#e09040'
+			return '#ffa86a'
 		case 'static':
-			return '#5a7090'
+			return '#7aa8d8'
 	}
 }
 
@@ -112,18 +114,18 @@ function getObstacleColor(obstacle: ObstacleState): string {
  */
 function getObstacleIntensity(obstacle: ObstacleState): number {
 	if (obstacle.collidingOrbSides.length > 0) {
-		return 2.0 // collision highlight pops close to orb brightness
+		return 2.2 // collision highlight pops close to orb brightness
 	}
 
 	switch (obstacle.kind) {
 		case 'moving':
-			return 1.5
+			return 1.8
 		case 'angular':
-			return 1.2
+			return 1.5
 		case 'angular_long':
-			return 1.3
+			return 1.7
 		case 'static':
-			return 1.0
+			return 1.3
 	}
 }
 
@@ -136,18 +138,41 @@ function getObstacleIntensity(obstacle: ObstacleState): number {
  */
 function getObstacleBaseFill(obstacle: ObstacleState): number {
 	if (obstacle.collidingOrbSides.length > 0) {
-		return 2.0
+		return 2.4
 	}
 
 	switch (obstacle.kind) {
 		case 'static':
-			return 0.7
+			return 0.5
 		case 'angular':
-			return 0.9
+			return 0.65
 		case 'angular_long':
-			return 1.0
+			return 0.75
 		case 'moving':
-			return 1.2
+			return 0.9
+	}
+}
+
+/**
+ * Per-kind scanline frequency along world Y (higher = tighter stripes). The
+ * holographic reference demo reads as tight crisp scanlines; bigger boxes can
+ * carry more stripes without smearing, so the long angular bar gets the
+ * densest field.
+ */
+function getObstacleStripeFrequency(obstacle: ObstacleState): number {
+	if (obstacle.collidingOrbSides.length > 0) {
+		return 36
+	}
+
+	switch (obstacle.kind) {
+		case 'angular_long':
+			return 34
+		case 'angular':
+			return 30
+		case 'moving':
+			return 32
+		case 'static':
+			return 26
 	}
 }
 
@@ -163,17 +188,17 @@ function getObstacleBaseFill(obstacle: ObstacleState): number {
  */
 function getObstacleGlitch(obstacle: ObstacleState): number {
 	if (obstacle.collidingOrbSides.length > 0) {
-		return 0.7
+		return 0.8
 	}
 
 	switch (obstacle.kind) {
 		case 'moving':
-			return 0.45
+			return 0.5
 		case 'angular':
-			return 0.32
+			return 0.36
 		case 'angular_long':
-			return 0.38
+			return 0.42
 		case 'static':
-			return 0.15
+			return 0.18
 	}
 }

@@ -4,12 +4,22 @@
 		"Segoe UI",
 		Roboto,
 		sans-serif;
-	color: #20242d;
-	background: #eef1e8;
+	color: #e6ecf5;
+	background: #05060d;
 	font-synthesis: none;
 	text-rendering: optimizeLegibility;
 	-webkit-font-smoothing: antialiased;
 	-moz-osx-font-smoothing: grayscale;
+
+	/* Shared cyberpunk accent palette — mirrored from the 3D orb identity
+	   colors in `src/entities/OrbitEntity.tsx` (ORB_COLOR) so the HUD and
+	   the on-screen scene can be tuned together. */
+	--hud-accent: #dce6ff;
+	--hud-accent-warm: #d84f3f;
+	--hud-accent-cool: #2f6fd8;
+	--hud-bg: rgba(8, 10, 18, 0.55);
+	--hud-stroke: rgba(150, 190, 255, 0.28);
+	--hud-stroke-strong: rgba(180, 210, 255, 0.55);
 }
 
 * {

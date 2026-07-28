@@ -1,11 +1,13 @@
 import type Node from 'three/src/nodes/core/Node.js'
 import {
+	add,
 	cameraPosition,
 	dot,
 	Fn,
 	faceDirection,
 	fract,
 	mod,
+	mul,
 	normalize,
 	normalLocal,
 	positionLocal,
@@ -34,67 +36,65 @@ import { time } from '../shaders/shared'
  *   - vertex glitch: nudge local position.x/z by (random2D - 0.5) * glitchFn,
  *     where glitchFn is the time-driven multi-sine smoothed to [0,1] * strength
  *   - fragment: `alpha = (stripes*fresnel + fresnel*1.25) * falloff`, where
- *     `falloff = smoothstep(0.8, 0.2, fresnel)` (1 face-on, 0 at the rim). This
- *     yields a bright holographic *field* across the body that fades softly at
- *     the silhouette — the look from the example. Scaled by an `intensity`
- *     uniform so orbs/obstacles can be tuned independently.
+ *     `falloff = smoothstep(0.8, 0.2, fresnel)` (0 face-on, 1 at the rim). This
+ *     yields a crisp bright holographic *band* sweeping the silhouette that
+ *     fades to nothing at face-on — the look from the reference demo. Add a
+ *     `baseFill` term (view-independent scrolling scanlines) so flat box faces
+ *     read as a holographic panel front-on instead of disappearing.
  *
- * Coordinate-space note (the bug we fixed here):
+ * Coordinate-space note (the bug we fixed earlier here):
  *   `material.positionNode` is assigned back to `positionLocal` by
- *   `NodeMaterial.setupPosition` (see `three/src/materials/nodes/NodeMaterial.js`)
- *   and is then transformed into world space by `modelWorldMatrix`. So
- *   `positionNode` MUST be an **object-space** expression. Assigning a
- *   world-space expression (as we originally did with a `varying` of
- *   `positionWorld + offset`) caused the renderer to re-apply the model
- *   matrix on an already-world vector — the orb got double-transformed and
- *   visibly exploded away from its group's translation (the meshes appeared
- *   to wander off their cores). Now we displace in local space; the fragment
- *   reads the (correctly derived) `positionWorld`.
+ *   `NodeMaterial.setupPosition` and is then transformed into world space by
+ *   `modelWorldMatrix`. So `positionNode` MUST be an **object-space**
+ *   expression. We displace in local space; the fragment reads the (correctly
+ *   derived) `positionWorld`.
  *
  * Render flags match the reference:
- *   transparent, depthWrite:false, AdditiveBlending, DoubleSide.
- *
- * `time` is the shared global uniform (src/three/shaders/shared.ts) updated
- * once per frame by `<ShaderClock>`.
- *
- * See docs/visual-redesign.md Step 1.
+ *   transparent, depthWrite:false (default), AdditiveBlending, DoubleSide.
  */
 
 // random2D(value) -> fract(sin(dot(value, vec2(12.9898, 78.233))) * 43758.5453123)
-// Pure expression — no shader stack needed, so a plain helper suffices.
 const random2D = (value: Node<'vec2'>) =>
 	fract(sin(dot(value, vec2(12.9898, 78.233))).mul(43758.5453123))
 
 export type HolographicOptions = {
 	readonly color: Color | string | number
 	readonly glitchStrength?: number
-	/** Overall brightness multiplier. Scales both the body scanline fill and
-	 * the fresnel rim band. Keep obstacles ~0.7, orbs ~1.4. */
+	/** Overall brightness multiplier on the final alpha. Orbs ~1.4, obstacles
+	 * 1.0–2.0 (additive can't brighten a dim color, so colors themselves are
+	 * already luminous; intensity scales the whole holographic field). */
 	readonly intensity?: number
-	/** Strength of the view-independent scanline body fill (0-1). The
-	 * reference fresnel-only formula is **transparent at face-on**
-	 * (fresnel=0 → alpha=0), so flat surfaces perpendicular to the camera —
-	 * i.e. obstacle box faces — render as nothing but a thin rim. A
-	 * `baseFill` term adds a scrolling-stripe field across the whole body so
-	 * the holographic panel reads front-on; orbs keep it low/zero so they
-	 * stay shell-like energy spheres with a glowing rim band. Obstacles use
-	 * ~0.15. */
+	/** Strength of the view-independent scanline body fill (0..N). The pure
+	 * fresnel formula is transparent at face-on, so flat box faces facing the
+	 * camera render as nothing but a thin rim. `baseFill` adds a scrolling
+	 * scanline field across the whole body so a flat front reads as a
+	 * holographic panel with moving scanlines. Spheres keep it 0 to stay
+	 * shell-like with a glowing rim band. */
 	readonly baseFill?: number
+	/** Scanline frequency along world Y (higher = tighter stripes). */
+	readonly stripeFrequency?: number
+	/** Scanline scroll speed (world-y units per second). */
+	readonly stripeSpeed?: number
+	/** Optional brightness pulse applied on top of `intensity`:
+	 *  effective = intensity * (pulseFloor + pulseAmp * sin(time*speed + phase)).
+	 * Use to make a small holographic core (orb hotspot) beat. The orb
+	 *  shell leaves this off (static intensity) and the core pulses. */
+	readonly pulse?: {
+		readonly speed?: number
+		readonly phase?: number
+		/** Sin floor (baseline brightness). Default 0.6. */
+		readonly floor?: number
+		/** Sin amplitude (0..1). Default 0.4 → 0.2..1.0 range. */
+		readonly amp?: number
+	}
 	/** Write to the depth buffer so the mesh occludes additive peers. Default
-	 * `false` (reference behavior — additive shells don't sort). Set `true`
-	 * for the orb spheres so the orbit torus *behind* a sphere gets
-	 * depth-culled instead of bleeding through. Obstacles stay `false` so orbs
-	 * + ring draw over them. When `depthWrite` is on we also set `alphaTest`
-	 * so fully-transparent holographic fragments are **discarded** (don't
-	 * write depth) — otherwise the orb's dim center would shield the ring
-	 * behind it through an invisible depth wall. */
-
+	 * `false`. Set `true` for orb spheres so the orbit ring behind a sphere
+	 * is depth-culled instead of bleeding through. With `depthWrite` on we also
+	 * set `alphaTest` so fully-transparent holographic fragments are
+	 * discarded (don't write depth). */
 	readonly depthWrite?: boolean
 }
 
-// Sentinel used only to name the uniform node's type without importing
-// `UniformNode` (not re-exported from three/tsl). `uniformGlitchType`'s type
-// is `UniformNode<'float', number>`; `.value` is mutable for live tuning.
 const uniformGlitchType = uniform(0)
 type GlitchUniform = typeof uniformGlitchType
 const uniformIntensityType = uniform(0)
@@ -102,13 +102,6 @@ type IntensityUniform = typeof uniformIntensityType
 const uniformBaseFillType = uniform(0)
 type BaseFillUniform = typeof uniformBaseFillType
 
-/**
- * Per-material glitch strength injected into the vertex displace Fn. `Fn`
- * closures capture node references, not JS values, so we rebuild this uniform
- * per factory call with the caller's value; the Fn references that specific
- * uniform node, whose `value` is mutable for live tuning (e.g. boost on
- * colliding obstacles).
- */
 export type HolographicMaterial = MeshBasicNodeMaterial & {
 	glitchStrength: GlitchUniform
 	intensity: IntensityUniform
@@ -120,30 +113,27 @@ export function createHolographicMaterial({
 	glitchStrength = 0.25,
 	intensity = 1.0,
 	baseFill = 0,
+	stripeFrequency = 20,
+	stripeSpeed = 0.05,
 	depthWrite = false,
+	pulse,
 }: HolographicOptions): HolographicMaterial {
 	const glitchUniform = uniform(glitchStrength)
 	const intensityUniform = uniform(intensity)
 	const baseFillUniform = uniform(baseFill)
+	const pulseSpeed = uniform(pulse?.speed ?? 0)
+	const pulsePhase = uniform(pulse?.phase ?? 0)
+	const pulseFloor = uniform(pulse?.floor ?? 0.6)
+	const pulseAmp = uniform(pulse?.amp ?? 0.4)
 	const depthWriteFlag = depthWrite
 
-	// Stage 1 — vertex displacement in OBJECT space. `positionNode` is
-	// assigned to `positionLocal` by the renderer, so it must be expressed
-	// relative to the mesh's own origin. The renderer then derives
-	// `positionWorld` from this displaced local position via `modelWorldMatrix`
-	// — which is exactly what the fragment stage reads below.
+	// --- Stage 1 — vertex glitch in OBJECT space --------------------------------
 	const displacedLocal = Fn((): Node<'vec3'> => {
 		const pos = positionLocal.toVar()
 
-		// Time-driven multi-sine glitch factor smoothed to [0,1].
-		// The reference uses `smoothstep(0.3, 1.0, glitch)` which only fires
-		// when the sum-of-3-sines exceeds 0.3 — a brief intermittent burst.
-		// That reads as "nothing most of the time" on small meshes, so we
-		// widen the range to `(-0.5, 0.8)` so the displacement is continuously
-		// modulated (always > 0 but varying with the sines) — the surface
-		// shimmers steadily rather than ticking. Use the local y as the
-		// per-vertex seed so equal-y rings jitter together (matches the GLSL
-		// reference's per-vertex feel).
+		// Time-driven multi-sine glitch factor smoothed to [0,1]. Widened
+		// from the reference's smoothstep(0.3, 1.0) so the displacement is
+		// continuously modulated, not an intermittent tick.
 		const glitchTime = time.sub(pos.y)
 		let glitch = sin(glitchTime)
 			.add(sin(glitchTime.mul(3.45)))
@@ -161,72 +151,66 @@ export function createHolographicMaterial({
 		return vec3(pos.x.add(offsetX), pos.y, pos.z.add(offsetZ))
 	})()
 
-	// Stage 2 — fragment alpha. The GLSL reference formula
-	// `holographic = (stripes*fresnel + fresnel*1.25) * falloff` is **0 at
-	// face-on** (fresnel=0 → alpha=0), so a surface pointing straight at the
-	// camera renders as nothing. That's fine for **spheres** (the surface
-	// curves smoothly so fresnel sweeps 0→1 across the disc and a glowing
-	// mid-radius band appears). It's **deadly for flat box faces** whose
-	// entire front is normal+z — those faces are uniformly face-on, so their
-	// front face renders as nothing but a thin rim and obstacle boxes become
-	// nearly invisible.
-	//
-	// So we add a view-independent **scanline body fill** — a 0..1 stripe
-	// pattern (mod of world y, scrolling with `time`) multiplied by
-	// `baseFillUniform`. Flat panels front-on now read as a scrolling
-	// holographic field instead of being deleted by the fresnel. Orbs pass
-	// `baseFill = 0` so they keep the pure rim-band shell look.
-	//
-	// Fresnel falloff and combine: see in-line. Total alpha =
-	//   (bodyFill + (stripes*fresnel + fresnel*1.25) * falloff) * intensity
+	// --- Stage 2 — fragment alpha -----------------------------------------------
+	// Reference: `holographic = (stripes*fresnel + fresnel*1.25) * falloff`.
+	// We add a view-independent `baseFill` scanline band so flat obstacle box
+	// faces read as a holographic panel front-on (the pure fresnel formula is
+	// 0 at face-on → boxes with a full face pointing at the camera vanish).
 	const alpha = Fn((): Node<'float'> => {
 		const pos = positionWorld.toVar()
 
-		// normal flipped on back faces:
-		//   normal = normalize(vNormal); if (!gl_FrontFacing) normal *= -1
-		// faceDirection is +1 front / -1 back, so mul flips the sign correctly.
+		// normal flipped on back faces (== reference's
+		//   `if(!gl_FrontFacing) normal *= -1`)
 		const normal = normalize(normalLocal).mul(faceDirection)
 
-		// Raw stripe position (before pow): used both for the rim-stripes and
-		// the body fill. Cubed for rim-modulation (the reference), kept raw for
-		// the body so the panel reads as bright lines instead of speckle.
-		const stripePos = mod(sub(pos.y, time.mul(0.05)).mul(20), 1)
+		// Scanlines: stripePos ∈ [0,1), scrolling down with time. Cubed for
+		// the rim-modulation (sharp bright lines), kept raw for the body fill
+		// (a continuous field with moving bright bands).
+		const stripePos = mod(
+			sub(pos.y, time.mul(stripeSpeed)).mul(stripeFrequency),
+			1,
+		)
 		const stripes = stripePos.pow(3)
 
-		// Body fill — view-independent scrolling scanline band.
-		// Average stripe contribution is ~0.5, so add an `0.5 * baseFill`
-		// DC offset before modulating — gives the whole panel a soft constant
-		// glow (holographic field) under the moving scanlines. `baseFill=0`
-		// (orbs) opts out completely.
-		const stripeContribution = stripePos.mul(stripePos).mul(0.5).sub(0.125)
-		const bodyFill = stripeContribution.add(0.5).mul(baseFillUniform)
+		// Body fill — view-independent scrolling scanlines + a soft DC glow so
+		// a flat panel reads front-on as a holographic field with moving
+		// bright bands, not empty space. `baseFill=0` (orbs) opts out.
+		const band = stripePos.mul(stripePos).mul(0.5) // ~0..0.5 bright band
+		const bodyFill = band.add(0.15).mul(baseFillUniform)
 
-		// Fresnel: viewDir = normalize(pos - cameraPosition); dot+1; pow2
+		// Fresnel: viewDir = normalize(pos - cameraPosition); dot+1; pow2.
+		// 0 at face-on, 1 at the silhouette.
 		const viewDir = normalize(sub(pos, cameraPosition))
 		const fresnel = dot(viewDir, normal).add(1).pow(2)
 
-		// Falloff: 1 at face-on (low fresnel), 0 at the silhouette (high
-		// fresnel). smoothstep's edge args are intentionally reversed.
+		// Falloff: 0 face-on, 1 at the rim (reverse smoothstep edges).
 		const falloff = smoothstep(0.8, 0.2, fresnel)
 
-		// Holographic combine (reference): stripes * fresnel + fresnel * 1.25,
-		// then masked by falloff. The `fresnel * 1.25` term is what lights the
-		// rim even where stripes are dark — keep it.
+		// Reference combine: stripes*fresnel + fresnel*1.25, masked by falloff.
+		// The `fresnel*1.25` lights the rim even where stripes are dark.
 		let holographic = stripes.mul(fresnel)
 		holographic = holographic.add(fresnel.mul(1.25))
 		holographic = holographic.mul(falloff)
 
-		return bodyFill.add(holographic).mul(intensityUniform)
+		// Optional brightness pulse on top of the static `intensity`. When
+		// `pulseSpeed` is 0 the pulse term collapses to `floor` (a no-op when
+		// floor==1, which we don't reach here — so callers who want a static
+		// intensity simply omit `pulse`).
+		const pulseTerm = pulseFloor.add(
+			pulseAmp.mul(sin(add(mul(time, pulseSpeed), pulsePhase))),
+		)
+		// Slight warm-cool tint shift of the rim toward the identity color on
+		// the fresnel band so the silhouette rim reads in-hue (matches the
+		// reference's uniform uColor, but lets body fill stay mid-bright).
+		return bodyFill.add(holographic).mul(intensityUniform).mul(pulseTerm)
 	})()
 
 	const material = new MeshBasicNodeMaterial()
 	material.color = new Color(color)
 	material.transparent = true
 	material.depthWrite = depthWriteFlag
-	// When writing depth, discard near-empty fragments so the orb's dim
-	// center doesn't write an invisible depth wall that masks the ring behind.
-	// 0.06 is just above the face-on center (~0) and underneath the bright
-	// fresnel band, so only truly empty pixels are culled.
+	// When writing depth, discard near-empty fragments so the orb's dim center
+	// doesn't write an invisible depth wall that masks the ring behind.
 	if (depthWriteFlag) {
 		material.alphaTest = 0.06
 	}

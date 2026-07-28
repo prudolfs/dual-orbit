@@ -1,45 +1,74 @@
-import { useFrame, useThree } from '@react-three/fiber'
+import { useFrame } from '@react-three/fiber'
 import { useEffect, useMemo, useRef } from 'react'
 import {
 	AdditiveBlending,
 	BufferAttribute,
 	BufferGeometry,
 	Color,
+	type IUniform,
 	type Points,
 	PointsMaterial,
+	Vector3,
 } from 'three'
 import { time } from '../three/shaders/shared'
 
 /**
- * Animated galaxy point-cloud background — see `docs/visual-redesign.md`
- * Step 4. Ported from `threejs-journey/30-animated-galaxy/`'s GLSL.
+ * Animated galaxy point-cloud background (docs/visual-redesign.md Step 4/7).
  *
- * A swirling spiral of additive points (`insideColor → outsideColor`). Each
- * point rotates around the galaxy's center at speed `~1 / r` (inner points
- * rotate faster — the spiral-arm shear). The WebGL backend of
- * `WebGPURenderer` hardcodes `gl_PointSize = 1.0` for `PointsNodeMaterial`
- * (so `sizeNode` is ignored — see `GLSLNodeBuilder._getGLSLVertexCode`),
- * **and** 1-pixel points don't cover enough of the screen for a dense nebula.
- * We therefore use a stock `PointsMaterial` (which uses the standard
- * `gl_PointSize` path that the backend honors), then animate the swirl by
- * rotating the whole `<points>` object on its Z axis in `useFrame` (the disc
- * lies in the XY plane, normal +Z, so a Z rotation reads as in-plane spin
- * — visually identical to the per-vertex rotation but ~free on the CPU).
+ * Ported from `threejs-journey/30-animated-galaxy/`. A swirling spiral of
+ * additive points colored `insideColor → outsideColor`. The signature journey
+ * motion is a **per-vertex** rotation: every point revolves around the galaxy
+ * center at angular speed `~1 / distanceToCenter`, so inner arms shear ahead
+ * of outer arms → the visible swirl. We inject that rotation into the stock
+ * `PointsMaterial` vertex shader via `onBeforeCompile` (the standard
+ * `gl_PointSize` path that `WebGPURenderer`'s WebGL fallback honors —
+ * `PointsNodeMaterial`'s `sizeNode` is hardcoded to 1px there; see
+ * `GLSLNodeBuilder._getGLSLVertexCode`). The `uTime` uniform is bumped each
+ * frame from the shared TSL `time` uniform so all scene materials stay in
+ * lockstep. On top of the per-vertex shear, the whole `<points>` object is
+ * slowly rotated on its disc-normal axis each frame so the arms sweep across
+ * the full frame (the per-vertex shear alone is only obvious in the dense
+ * core) — together this reproduces the journey-30 twirl.
  *
- * Step 5: the galaxy is locked to the camera (useFrame follow script) so the
- * swirl stays behind the play field regardless of camera pan.
- * `depthWrite:false` + `AdditiveBlending` → never occludes orbs/obstacles.
+ * Palette: **cool** nebula (cyan/purple core → deep indigo outside) so it
+ * contrasts the warm red / cool blue identity orbs instead of competing with
+ * the red orb. Dim overall — it must frame the action, never outshine the
+ * orbs/orbit ring.
+ *
+ * Locked to the camera as a **true backdrop** (Step 5, approach B refined):
+ * each frame we billboard the disc to the camera (copy its quaternion, so the
+ * disc's +Z normal always faces the view) and park it a fixed distance behind
+ * the play field along the camera's own view-forward axis. Billboard + no
+ * parallax + alignment to the view axis (not world -Z) means the nebula's
+ * apparent shape never warps as the camera pans/pitches following the orbit
+ * center → no twitch on scroll. `depthWrite:false` + `AdditiveBlending` →
+ * never occludes orbs/obstacles.
  */
+
+// Opt-in kill-switch for visual tuning (docs/visual-redesign.md Step 7):
+// `?nogalaxy` skips mounting the points cloud so orb/obstacle/ring brightness
+// can be probed in isolation against the dark clear color.
+const HIDDEN =
+	typeof window !== 'undefined'
+		? new URLSearchParams(window.location.search).has('nogalaxy')
+		: false
+
+// Reused scratch vector for the camera view-forward offset (avoids per-frame
+// allocation in the hot useFrame path).
+const _viewDir = new Vector3()
+
 export function GalaxyBackground({
-	count = 250000,
-	radius = 26,
-	branches = 4,
-	randomness = 1.5,
-	randomnessPower = 2.2,
-	insideColor = '#ff6030',
-	outsideColor = '#1b3984',
-	size = 1.0, // world units, attenuated by perspective
-	spinSpeed = 0.05, // base radians/sec; inner points effectively faster
+	count = 240000,
+	radius = 18,
+	branches = 5,
+	randomness = 1.4,
+	randomnessPower = 2.4,
+	insideColor = '#3a6fff',
+	outsideColor = '#0a1030',
+	size = 0.6, // world units, attenuated by perspective
+	spinSpeed = 0.45, // outward rotation factor; inner arms rotate ~1/r * spinSpeed
+	discSpin = 0.04, // whole-disc rad/s on top of the per-vertex shear
+	behind = 34, // how far behind the camera the disc sits, along view-forward
 }: {
 	count?: number
 	radius?: number
@@ -50,12 +79,13 @@ export function GalaxyBackground({
 	outsideColor?: string
 	size?: number
 	spinSpeed?: number
+	discSpin?: number
+	behind?: number
 } = {}) {
 	const root = useRef<Points>(null)
-	const { camera } = useThree()
 
-	const { geometry, material } = useMemo(() => {
-		// --- Geometry (journey 30's `generateGalaxy`, ported 1:1) ---------
+	const { geometry, material, shaderHolder } = useMemo(() => {
+		// --- Geometry (journey 30's `generateGalaxy`, ported 1:1) ----------
 		const positions = new Float32Array(count * 3)
 		const colors = new Float32Array(count * 3)
 
@@ -67,8 +97,8 @@ export function GalaxyBackground({
 			const r = Math.random() * radius
 			const branchAngle = ((i % branches) / branches) * Math.PI * 2
 
-			// Fuzziness offset: `rand^P * sign * r * amount` — inner points
-			// stay close to the arm, outer fuzz out into a halo.
+			// `rand^P * sign * randomness * r`: inner points hug the arm,
+			// outer points fuzz into a halo.
 			const randOffset = (amount: number) =>
 				Math.random() ** randomnessPower *
 				(Math.random() < 0.5 ? 1 : -1) *
@@ -76,10 +106,9 @@ export function GalaxyBackground({
 				r *
 				amount
 
-			// Disc lies in the **XY plane** (normal +Z) so the camera — which
-			// looks along -Z at the play field at z=0 — sees the disc face-on
-			// (matches journey-30's tilted-camera read; without this the XZ
-			// disc would render edge-on as a thin line of points).
+			// Disc lies in the **XY plane** (normal +Z). Billboarding the
+			// points object to the camera keeps this XY disc face-on to the
+			// view at all times (an XZ disc would render edge-on as a line).
 			positions[i3] = Math.cos(branchAngle) * r + randOffset(1)
 			positions[i3 + 1] = Math.sin(branchAngle) * r + randOffset(1)
 			positions[i3 + 2] = randOffset(0.45) // squashed Z thickness
@@ -94,11 +123,10 @@ export function GalaxyBackground({
 		geo.setAttribute('position', new BufferAttribute(positions, 3))
 		geo.setAttribute('color', new BufferAttribute(colors, 3))
 
-		// Stock PointsMaterial — the standard WebGL `gl_PointSize` path the
-		// WebGPURenderer fallback honors. `size=0.35` world units + size
-		// attenuation → points near the camera (~25 units away) project to a
-		// few px, points farther out shrink to sub-pixel and additive-blend
-		// into a soft nebula cloud. The classic journey-30 read.
+		// Per-vertex rotation is injected via `onBeforeCompile`. We stash the
+		// shader's uniforms object on a mutable holder so the `useFrame` below
+		// can bump its `uTime` uniform each frame.
+		const holder: { uniforms: Record<string, IUniform> } = { uniforms: {} }
 		const mat = new PointsMaterial({
 			size,
 			sizeAttenuation: true,
@@ -107,28 +135,53 @@ export function GalaxyBackground({
 			depthWrite: false,
 			blending: AdditiveBlending,
 		})
-		// Soft round dots — alpha-mask the point sprite's corners so the
-		// additive nebula reads as a fog of overlapping discs, not chunky
-		// squares. (Baked fragment via `onBeforeCompile` of a tiny shader
-		// patch that fades the corner distance.)
 		mat.onBeforeCompile = (shader) => {
+			shader.uniforms.uTime = { value: 0 }
+			shader.uniforms.uSpinSpeed = { value: spinSpeed }
+			// Per-vertex swirl: rotate each point around the disc center (XY
+			// plane) by an angle proportional to `1 / distanceToCenter * uTime`
+			// — the journey-30 algorithm. Inner points revolve faster → the
+			// spiral arms shear visibly over time.
+			shader.vertexShader = /* glsl */ `
+				uniform float uTime;
+				uniform float uSpinSpeed;
+				${shader.vertexShader}
+			`.replace(
+				'#include <begin_vertex>',
+				/* glsl */ `
+				#include <begin_vertex>
+				{
+					// distance to the disc center in the XY plane (the
+					// disc lies in the XY plane, normal +Z)
+					float dist = length(position.xy);
+					// base polar angle of this point in the XY plane
+					float angle = atan(position.y, position.x);
+					// inner arms rotate faster (1/r) — the signature shear
+					angle += (1.0 / max(dist, 0.001)) * uTime * uSpinSpeed;
+					transformed.x = cos(angle) * dist;
+					transformed.y = sin(angle) * dist;
+				}
+			`,
+			)
+			// Soft round dots — smoothstep-mask the point sprite's corners so
+			// the additive nebula reads as overlapping soft discs, not chunky
+			// squares. AdditiveBlending ignores fragment alpha, so multiply RGB
+			// (and alpha) by a radial mask.
 			shader.fragmentShader = shader.fragmentShader.replace(
 				'#include <output_fragment>',
-				`{
-					// distance to the center of the point sprite (0..0.707)
+				/* glsl */ `
+				{
 					float pd = distance(gl_PointCoord, vec2(0.5));
-					// falloff: soft additive disc. AdditiveBlending ignores
-					// fragment alpha, so multiply RGB by a smoothstep mask
-					// so corners fade to 0 instead of stamping chunky
-					// squares across the nebula.
 					float mask = smoothstep(0.5, 0.18, pd);
 					diffuseColor.rgb *= mask;
 					diffuseColor.a *= mask;
 				}
-				#include <output_fragment>`,
+				#include <output_fragment>
+			`,
 			)
+			holder.uniforms = shader.uniforms
 		}
-		return { geometry: geo, material: mat }
+		return { geometry: geo, material: mat, shaderHolder: holder }
 	}, [
 		count,
 		radius,
@@ -138,9 +191,9 @@ export function GalaxyBackground({
 		insideColor,
 		outsideColor,
 		size,
+		spinSpeed,
 	])
 
-	// Dispose of GPU resources on unmount / parameter change.
 	useEffect(
 		() => () => {
 			material.dispose()
@@ -149,27 +202,46 @@ export function GalaxyBackground({
 		[material, geometry],
 	)
 
-	// Per-frame: lock the galaxy to the camera (Step 5, approach B) and spin
-	// the disc around its Z axis. We copy the camera's x/y and place the
-	// disc at z = camera.z - 25 — ~25 units behind the play field. The disc
-	// radius (18 world units) extends past the visible field so the nebula
-	// fills the whole frame at any camera pan.
-	useFrame((_, delta) => {
-		if (!root.current) {
-			return
+	// Per-frame: advance the per-vertex rotation uniform from the shared
+	// `time` clock, and lock the galaxy to the camera as a true backdrop
+	// (billboarded + offset along the view-forward axis) so the swirl fills
+	// the whole frame at any camera pan with no parallax-warp / no twitch.
+	useFrame((state, delta) => {
+		const u = shaderHolder.uniforms.uTime as { value: number } | undefined
+		if (u) {
+			u.value += Math.min(delta, 0.1)
 		}
-		root.current.position.copy(camera.position)
-		root.current.position.z -= 18
-		// Z-axis spin: inner points effectively travel faster (smaller
-		// circumference, same angular velocity) — the journey-30 visual
-		// cue of inner-arm shear without per-vertex angular speed.
-		root.current.rotation.z += spinSpeed * delta
+		if (root.current) {
+			// Billboard the disc to the camera: copy the camera's quaternion
+			// so the disc's +Z normal always faces the view. The apparent
+			// shape of the nebula stays constant as the camera pans/pitches
+			// following the orbit center → no frame-to-frame warp, hence no
+			// twitch when the game scrolls.
+			root.current.quaternion.copy(state.camera.quaternion)
+			// Park the disc a fixed distance behind the play field along the
+			// camera's *own* view-forward axis (not world -Z), so it stays
+			// fully behind the action regardless of camera pitch/yaw.
+			state.camera.getWorldDirection(_viewDir)
+			root.current.position
+				.copy(state.camera.position)
+				.addScaledVector(_viewDir, -behind)
+			// Global disc spin on top of the per-vertex 1/r shear so the arms
+			// sweep visibly across the full frame (the per-vertex shear alone
+			// only reads in the dense core). `rotateZ` is in the disc's *local*
+			// space (after the billboard copy its local +Z == camera forward),
+			// so this is an in-plane spin — the journey-30 twirl.
+			root.current.rotateZ(delta * discSpin)
+		}
 	})
 
-	// Reference `time` (the shared TSL clock) so the import isn't flagged
-	// as unused — the spin is JS-side here, but other TSL materials in the
-	// scene share this same uniform (see ShaderClock).
+	// Reference `time` so the shared-clock import isn't flagged; the spin is
+	// driven by the JS-bumped `uTime` uniform above (PointsMaterial can't
+	// take a TSL node uniform).
 	void time
+
+	if (HIDDEN) {
+		return null
+	}
 
 	return (
 		<points

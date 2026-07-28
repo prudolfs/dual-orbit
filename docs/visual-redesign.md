@@ -479,7 +479,7 @@ rather than a distant tiny galaxy.
 
 `depthWrite:false` + `AdditiveBlending` → never occludes orbs/obstacles.
 
-### Step 6 — Integration & lighting cleanup
+### Step 6 — Integration & lighting cleanup ✅
 
 In `src/scene/GameScene.tsx`:
 
@@ -492,7 +492,7 @@ In `src/scene/GameScene.tsx`:
   `MeshBasicNodeMaterial` (holographic/energy) that ignores lighting; HUD is
   DOM. No lights to revisit here.
 
-### Step 6b — Cyberpunk HUD
+### Step 6b — Cyberpunk HUD ✅
 
 Restyle `src/App.css` (and `src/index.css` root colors) to match the new
 energy scene. The HUD is DOM, so this is pure CSS — no scene changes. Goals:
@@ -518,6 +518,33 @@ energy scene. The HUD is DOM, so this is pure CSS — no scene changes. Goals:
 
 ### Step 7 — Visual tuning
 
+- **Glaxy twirl + scroll-twitch fix (iteration):** the per-vertex `1/r` swirl
+  alone was only visible in the dense core (the dense arms are a tiny dot at
+  `radius=34` against a camera at z=12). Shrunk the disc to `radius=18`,
+  bumped `spinSpeed` to `0.45`, and added a slow whole-disc `rotateZ(0.04)` on
+  top of the per-vertex shear so the arms sweep across the full frame — the
+  journey-30 twirl now reads at a glance. The scroll-twitch came from the disc
+  being offset purely on world `-Z` while the camera pitches (`lookAt`
+  follows the orbit center) → the face-on disc warped frame-to-frame. Now the
+  disc is **billboarded to the camera** (`quaternion.copy(camera.quaternion)`)
+  and parked along the camera's **own view-forward axis** at a fixed distance,
+  so its apparent shape is constant → no warp, no twitch on scroll.
+- **Orb pulsing core is now holographic + smaller + counter-spins.** The core
+  reuses `createHolographicMaterial` (with `pulse` option: brightness beats
+  `0.5 + 0.5*sin(time*1.8+phase)`) so it carries the same fresnel + stripes +
+  glitch hologram effect as the shell, tinted toward white. It is smaller
+  (~0.3× orb radius, down from 0.42×) and spins on x/y in the **opposite**
+  direction to the shell, so it reads as a distinct ticking energy bead inside
+  the orb rather than a mini-echo of the shell. `createHolographicMaterial`
+  gained a `pulse` option (`{speed, phase, floor, amp}`) that multiplies the
+  final alpha by `floor + amp*sin(time*speed+phase)` — orbs leave it off,
+  core uses it.
+- **Obstacles read more like jelly](translucent energy, less solid fill).**
+  Reduced per-kind `baseFill` (static 0.5 … moving 0.9, collision 2.4) so the
+  front face is a translucent scrolling-scanline field with a stronger
+  fresnel rim, not a solid panel. Diversified per-kind colors so they're no
+  longer all-blue: `static` cool slate-blue, `angular` cyan-teal, `moving`
+  purple, `angular_long` warm orange, collision yellow — distinct energies.
 - **Background vs gameplay contrast**: galaxy palette cool/dim; orbs (red/blue)
   bright cores + halos so they read first. The orbit-path ring is bright so
   the rotation path stands out against the galaxy. Tune galaxy

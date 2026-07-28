@@ -21,23 +21,22 @@ import {
 import { time } from '../shaders/shared'
 
 /**
- * Energy materials for the orb "energy" layers (see docs/visual-redesign.md
- * Step 2). Built on `MeshBasicNodeMaterial` (additive, no depth write) so they
- * stack over the holographic sphere and core without occluding gameplay.
+ * Energy materials for the orb "energy" layers (docs/visual-redesign.md
+ * Step 2). Built on `MeshBasicNodeMaterial` (additive, no depth write) so
+ * they stack over the holographic sphere and core without occluding gameplay.
  *
  * All animate from the shared global `time` uniform (src/three/shaders/shared).
  */
 
-// `uniform()` has no type arg in three/tsl (the generic is keyed to an internal
-// `UniformValue` map); derive the actual return type via a sentinel instead.
 const uniformNumberType = uniform(0)
 export type UniformNumber = typeof uniformNumberType
 
 // --- Pulsing core -----------------------------------------------------------
-// A smaller bright additive sphere at the orb center whose opacity pulses:
-//   intensity = 0.6 + 0.4 * sin(time * speed + phase)
-// `speed`/`phase` are per-instance uniforms so the two orbs can beat out of
-// sync and the pulse visually alive.
+// A bright additive sphere at the orb center whose opacity pulses:
+//   intensity = 0.5 + 0.5 * sin(time * speed + phase)   ∈ [0, 1]
+// `speed`/`phase` are per-instance uniforms so the two orbs beat out of sync.
+// Bright enough (lerp toward white ~0.75 by the caller's `color` choice) to
+// read as the bright hotspot of the energy orb on top of the fresnel shell.
 export type PulsingCoreMaterial = MeshBasicNodeMaterial & {
 	speed: UniformNumber
 	phase: UniformNumber
@@ -45,7 +44,7 @@ export type PulsingCoreMaterial = MeshBasicNodeMaterial & {
 
 export function createPulsingCoreMaterial({
 	color,
-	speed = 2.5,
+	speed = 2.0,
 	phase = 0,
 }: {
 	color: Color | string | number
@@ -56,8 +55,9 @@ export function createPulsingCoreMaterial({
 	const uPhase = uniform(phase)
 
 	const alpha = Fn((): Node<'float'> => {
-		// intensity = 0.6 + 0.4 * sin(time * speed + phase)
-		return add(0.6, mul(0.4, sin(add(mul(time, uSpeed), uPhase))))
+		// 0.5 + 0.5 * sin → [0, 1]; baseline floor so the core never fully
+		// vanishes between pulses (keeps the orb identity alive).
+		return add(0.5, mul(0.5, sin(add(mul(time, uSpeed), uPhase))))
 	})()
 
 	const material = new MeshBasicNodeMaterial()
@@ -76,16 +76,15 @@ export function createPulsingCoreMaterial({
 
 // --- Back-disc halo ---------------------------------------------------------
 // A flat plane facing the camera (caller billboards it) with a soft radial
-// falloff so it reads as a glow disc behind the orb.
-//   strength = pow(1.0 - distance(uv, 0.5) * 2.0, 4.0)
-// `uIntensity` lets callers dim the disc (lower than the orbs) or fade it.
+// falloff → a glow disc behind the orb.
+//   strength = pow(1.0 - distance(uv, 0.5) * 2.0, 4.0) * uIntensity
 export type BackDiscMaterial = MeshBasicNodeMaterial & {
 	intensity: UniformNumber
 }
 
 export function createBackDiscMaterial({
 	color,
-	intensity = 0.5,
+	intensity = 0.7,
 }: {
 	color: Color | string | number
 	intensity?: number
@@ -93,10 +92,9 @@ export function createBackDiscMaterial({
 	const uIntensity = uniform(intensity)
 
 	const alpha = Fn((): Node<'float'> => {
-		// distance from disk center in [0..~0.707]; *2 -> [0..~1.414]; clamp via pow
 		const d = distance(uv(), vec2(0.5)).mul(2)
 		const falloff = sub(1, d)
-		return pow(falloff, 4).mul(uIntensity)
+		return pow(falloff, 3).mul(uIntensity)
 	})()
 
 	const material = new MeshBasicNodeMaterial()
@@ -113,44 +111,45 @@ export function createBackDiscMaterial({
 }
 
 // --- Orbit-path ring --------------------------------------------------------
-// A thin **torus** tracing the orbs' rotation path. We switched from a flat
-// `ringGeometry` to a torus so the orbit reads as a real 3D track the orbs
-// ride (the orbs straddle the tube), instead of a flat disc drawn on top.
-// It writes depth (`depthWrite:true`) and the orb spheres also write depth, so
-// the orbs occlude the back half of the tube and the front half of the tube
-// occludes the back of the orbs — true 3D "orb sitting on the ring".
-// It glows: a steady additive base plus a soft pulse along `time` so the
-// ring feels alive without strobing. `intensity` is a uniform for live tuning.
+// A thin glowing ring tracing the orbs' rotation path. Rendered as a flat
+// `ringGeometry` disc (a thin annulus) in the orbs' XY play plane:
+//  - additive, `depthWrite:false` and `depthTest:false` → it never occludes
+//    orbs and never z-fights at the orb/ring intersection (the previous torus
+//    with depthWrite:true flickered as it traded depth against the orb
+//    spheres, and could render *over* an orb depending on draw order).
+//    With depthTest off the ring is a fixed translucent overlay glowing
+//    through the orbs.
+//  - a gentle pulse along `time` so it feels alive without strobing.
+// `intensity` is a uniform for live tuning. Tuned to read as a crisp bright
+// accent but sit just under the orb-core brightness (the orbs are the
+// brightest gameplay object; the ring is the readability anchor).
 export type OrbitRingMaterial = MeshBasicNodeMaterial & {
 	intensity: UniformNumber
 }
 
 export function createOrbitRingMaterial({
 	color = '#dce6ff',
-	intensity = 1.0,
+	intensity = 0.9,
 }: {
 	color?: Color | string | number
 	intensity?: number
 } = {}): OrbitRingMaterial {
 	const uIntensity = uniform(intensity)
 
-	// Steady base glow + a gentle 25% pulse. Keeps the ring visible at all
-	// times (it's the gameplay-readability anchor) while feeling energetic.
+	// Steady base glow + a gentle 20% pulse.
 	const alpha = Fn((): Node<'float'> => {
 		const base = float(0.85)
-		const pulse = sin(time.mul(2.0)).mul(0.5).add(0.5).mul(0.25)
+		const pulse = sin(time.mul(2.0)).mul(0.5).add(0.5).mul(0.2)
 		return base.add(pulse).mul(uIntensity)
 	})()
 
 	const material = new MeshBasicNodeMaterial()
 	material.color = new Color(color)
 	material.transparent = true
-	// Write + test depth so the torus is a real 3D tube: the orbs (which also
-	// write depth) straddle it and occlude the half of the tube behind them,
-	// while the front half of the tube occludes the back of the orbs. Without
-	// depthWrite the flat-on-paper ring just drew *over* every orb.
-	material.depthWrite = true
-	material.depthTest = true
+	// No depth interaction: the ring is a pure additive overlay so it neither
+	// occludes the orbs nor fights them at the intersection line.
+	material.depthWrite = false
+	material.depthTest = false
 	material.blending = AdditiveBlending
 	material.side = DoubleSide
 	material.opacityNode = alpha
