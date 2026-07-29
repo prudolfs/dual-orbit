@@ -59,7 +59,7 @@ const _viewDir = new Vector3()
 
 export function GalaxyBackground({
 	count = 240000,
-	radius = 18,
+	radius = 26,
 	branches = 5,
 	randomness = 1.4,
 	randomnessPower = 2.4,
@@ -68,7 +68,7 @@ export function GalaxyBackground({
 	size = 0.6, // world units, attenuated by perspective
 	spinSpeed = 0.45, // outward rotation factor; inner arms rotate ~1/r * spinSpeed
 	discSpin = 0.04, // whole-disc rad/s on top of the per-vertex shear
-	behind = 34, // how far behind the camera the disc sits, along view-forward
+	behind = 14, // how far in front of the camera (just behind the play field) the disc sits
 }: {
 	count?: number
 	radius?: number
@@ -106,12 +106,15 @@ export function GalaxyBackground({
 				r *
 				amount
 
-			// Disc lies in the **XY plane** (normal +Z). Billboarding the
-			// points object to the camera keeps this XY disc face-on to the
-			// view at all times (an XZ disc would render edge-on as a line).
+			// Disc lies in the **XY plane** (normal +Z),billboarded to the
+			// camera so its +Z normal faces the view at all times. We keep the
+			// disc essentially flat (negligible Z thickness) so every point
+			// sits at a single depth in front of the camera — no points stray
+			// behind the near plane (which caused the size-attenuation twitch),
+			// and the additive nebula reads as a clean flat swirling sheet.
 			positions[i3] = Math.cos(branchAngle) * r + randOffset(1)
 			positions[i3 + 1] = Math.sin(branchAngle) * r + randOffset(1)
-			positions[i3 + 2] = randOffset(0.45) // squashed Z thickness
+			positions[i3 + 2] = randOffset(0.06) // very thin, in-plane
 
 			const mixed = cInside.clone().lerp(cOutside, r / radius)
 			colors[i3] = mixed.r
@@ -218,13 +221,16 @@ export function GalaxyBackground({
 			// following the orbit center → no frame-to-frame warp, hence no
 			// twitch when the game scrolls.
 			root.current.quaternion.copy(state.camera.quaternion)
-			// Park the disc a fixed distance behind the play field along the
-			// camera's *own* view-forward axis (not world -Z), so it stays
-			// fully behind the action regardless of camera pitch/yaw.
+			// Park the disc a fixed distance **in front of** the camera (just
+			// behind the play field) along the camera's own view-forward axis —
+			// NOT world -Z, so it stays framed as the orbit center pans/pitches.
+			// `getWorldDirection` returns the camera's forward (look) direction,
+			// so `+behind` moves along it, away from the camera, past the
+			// playfield at z~0 (camera is at z~12).
 			state.camera.getWorldDirection(_viewDir)
 			root.current.position
 				.copy(state.camera.position)
-				.addScaledVector(_viewDir, -behind)
+				.addScaledVector(_viewDir, behind)
 			// Global disc spin on top of the per-vertex 1/r shear so the arms
 			// sweep visibly across the full frame (the per-vertex shear alone
 			// only reads in the dense core). `rotateZ` is in the disc's *local*

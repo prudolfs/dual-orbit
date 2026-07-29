@@ -107,49 +107,53 @@ function getObstacleColor(obstacle: ObstacleState): string {
 }
 
 /**
- * Per-kind overall brightness of the holographic material. Scales both the
- * scanline body fill and the fresnel rim band. Obstacles need to read as
- * energy panels against the dark `#05060d` backdrop but stay clearly dimmer
- * than the player orbs (orb spheres use 1.4). Collisions get a bright pop.
+ * Per-kind overall brightness of the holographic material. Scales both
+ * the scanline body fill and the fresnel rim band. Obstacles read as the
+ * SAME pure holographic-shell look as the orbs (fresnel rim band + scrolling
+ * stripes + glitch), just in different colors — so they sit at orb-level
+ * brightness. Collisions get a bright pop.
  */
 function getObstacleIntensity(obstacle: ObstacleState): number {
 	if (obstacle.collidingOrbSides.length > 0) {
-		return 2.2 // collision highlight pops close to orb brightness
+		return 3.0 // collision highlight pops above orb brightness
 	}
 
 	switch (obstacle.kind) {
 		case 'moving':
-			return 1.8
+			return 2.6
 		case 'angular':
-			return 1.5
+			return 2.2
 		case 'angular_long':
-			return 1.7
+			return 2.4
 		case 'static':
-			return 1.3
+			return 2.0
 	}
 }
 
 /**
- * Per-kind scanline body fill (see HolographicOptions.baseFill). Flat box
- * faces facing the camera are transparent under the reference fresnel alpha,
- * so without a body fill obstacles become invisible except a thin rim.
- * Higher-fill kinds read as denser energy panels; the collision highlight
- * uses the strongest fill so the warning reads across the whole frame.
+ * Per-kind scanline body fill (see HolographicOptions.baseFill). We keep
+ * obstacles as **pure holographic shells** like the orbs — almost no body
+ * fill, so the fresnel rim band + scrolling stripes + glitch dominate the
+ * look (the user wants obstacles to look holographic, like the orbs, just
+ * colored differently). A tiny non-zero baseFill keeps a face-on flat box
+ * front from being a totally empty rim when no fresnel band crosses it, but
+ * it stays faint enough that the obstacle reads as a glowing holographic
+ * outline/field, not a solid panel.
  */
 function getObstacleBaseFill(obstacle: ObstacleState): number {
 	if (obstacle.collidingOrbSides.length > 0) {
-		return 2.4
+		return 0.4
 	}
 
 	switch (obstacle.kind) {
 		case 'static':
-			return 0.5
+			return 0.12
 		case 'angular':
-			return 0.65
+			return 0.15
 		case 'angular_long':
-			return 0.75
+			return 0.15
 		case 'moving':
-			return 0.9
+			return 0.2
 	}
 }
 

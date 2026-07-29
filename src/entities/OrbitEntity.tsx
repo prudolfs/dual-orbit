@@ -1,7 +1,7 @@
 import { useFrame } from '@react-three/fiber'
 import { useEffect, useMemo, useRef } from 'react'
 import type { Mesh } from 'three'
-import { Color, RingGeometry } from 'three'
+import { RingGeometry } from 'three'
 import type { GeneratorState, OrbitState } from '../game/types'
 import { toWorldPosition, toWorldSize } from '../scene/coordinates'
 import {
@@ -151,26 +151,24 @@ function Orb({ orb, orbitCenter, resolution, phase }: OrbProps) {
 			}),
 		[color],
 	)
-	// Pulsing core — a SMALL (~0.3× orb radius) holographic bead at the orb
-	// center. It reuses the holographic material (fresnel + stripes + glitch)
-	// so the core takes the same hologram/glitch look as the shell, tinted
-	// strongly toward white (~0.7) so it reads as the bright hotspot of the
-	// energy orb, with a small `baseFill` so the bead's front face reads as a
-	// glowing grid panel rather than an empty ring. The `pulse` option makes
-	// the whole holographic field beat (0.5..1.0) at its own speed/phase,
-	// out of sync with the shell which has no pulse.
-	const coreColor = whiteTint(color, 0.7)
+	// Pulsing core — a SMALL (~0.3× orb radius) holographic shell, the SAME
+	// holographic look as the orb itself (fresnel rim + stripes + glitch),
+	// using the orb's own identity color (not tinted white — the core must
+	// read as the same energy as the orb, just tighter and *pulsing*). No
+	// `baseFill`: like the orb shell it's a pure fresnel shell so it shows
+	// the same hologram band. The `pulse` option modulates the whole
+	// holographic field (0.4..1.0) at its own speed/phase, making the core
+	// visibly beat, out of sync with the static shell.
 	const coreMaterial = useMemo(
 		() =>
 			createHolographicMaterial({
-				color: coreColor,
+				color,
 				glitchStrength: 0.08,
-				intensity: 1.6,
-				baseFill: 0.5,
+				intensity: 2.0,
 				stripeFrequency: 40,
 				pulse: { speed: 1.8, phase, floor: 0.5, amp: 0.5 },
 			}),
-		[coreColor, phase],
+		[color, phase],
 	)
 	const discMaterial = useMemo(() => createBackDiscMaterial({ color }), [color])
 	useEffect(
@@ -249,11 +247,3 @@ function Orb({ orb, orbitCenter, resolution, phase }: OrbProps) {
 }
 
 // --- helpers --------------------------------------------------------------
-
-const _whiteVec = new Color('#ffffff')
-
-function whiteTint(base: string, towardWhite: number): Color {
-	// Lerp the orb identity color toward white by `towardWhite` (0..1) so the
-	// pulsing core reads as the bright hotspot of the energy orb.
-	return new Color(base).lerp(_whiteVec, towardWhite)
-}
