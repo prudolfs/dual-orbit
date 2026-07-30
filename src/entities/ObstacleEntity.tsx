@@ -109,9 +109,9 @@ function getObstacleColor(obstacle: ObstacleState): string {
 /**
  * Per-kind overall brightness of the holographic material. Scales both
  * the scanline body fill and the fresnel rim band. Obstacles read as the
- * SAME pure holographic-shell look as the orbs (fresnel rim band + scrolling
+ * SAME holographic-shell look as the orbs (fresnel rim band + scrolling
  * stripes + glitch), just in different colors — so they sit at orb-level
- * brightness. Collisions get a bright pop.
+ * brightness (orb spheres use 2.4). Collisions get a bright pop.
  */
 function getObstacleIntensity(obstacle: ObstacleState): number {
 	if (obstacle.collidingOrbSides.length > 0) {
@@ -131,29 +131,30 @@ function getObstacleIntensity(obstacle: ObstacleState): number {
 }
 
 /**
- * Per-kind scanline body fill (see HolographicOptions.baseFill). We keep
- * obstacles as **pure holographic shells** like the orbs — almost no body
- * fill, so the fresnel rim band + scrolling stripes + glitch dominate the
- * look (the user wants obstacles to look holographic, like the orbs, just
- * colored differently). A tiny non-zero baseFill keeps a face-on flat box
- * front from being a totally empty rim when no fresnel band crosses it, but
- * it stays faint enough that the obstacle reads as a glowing holographic
- * outline/field, not a solid panel.
+ * Per-kind scanline body fill (see HolographicOptions.baseFill). Obstacles
+ * read as **holographic energy** like the orbs: visible **scrolling
+ * scanlines** across the faces + a bright **fresnel rim** at the silhouette
+ * edges + glitch jitter. A `baseFill` of ~0.8–1.0 makes the face a moving
+ * stripe field (NOT a solid panel — the pure fresnel formula is 0 face-on
+ * so even with this fill the centre stays translucent and the rim dominates
+ * the silhouette). Without it the box reads as just an empty outline, not a
+ * hologram. Collision gets a stronger fill so the warning reads across the
+ * whole frame.
  */
 function getObstacleBaseFill(obstacle: ObstacleState): number {
 	if (obstacle.collidingOrbSides.length > 0) {
-		return 0.4
+		return 1.4
 	}
 
 	switch (obstacle.kind) {
 		case 'static':
-			return 0.12
+			return 0.7
 		case 'angular':
-			return 0.15
+			return 0.8
 		case 'angular_long':
-			return 0.15
+			return 0.85
 		case 'moving':
-			return 0.2
+			return 0.9
 	}
 }
 

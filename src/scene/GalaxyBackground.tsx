@@ -8,6 +8,7 @@ import {
 	type IUniform,
 	type Points,
 	PointsMaterial,
+	Quaternion,
 	Vector3,
 } from 'three'
 import { time } from '../three/shaders/shared'
@@ -56,6 +57,11 @@ const HIDDEN =
 // Reused scratch vector for the camera view-forward offset (avoids per-frame
 // allocation in the hot useFrame path).
 const _viewDir = new Vector3()
+// Scratches for composing the galaxy's final orientation each frame:
+// camera-facing billboard quaternion * accumulated in-plane spin quaternion.
+const _camQuat = new Quaternion()
+const _spinQuat = new Quaternion()
+const _SPIN_AXIS = new Vector3(0, 0, 1)
 
 export function GalaxyBackground({
 	count = 240000,
@@ -66,8 +72,8 @@ export function GalaxyBackground({
 	insideColor = '#3a6fff',
 	outsideColor = '#0a1030',
 	size = 0.6, // world units, attenuated by perspective
-	spinSpeed = 0.45, // outward rotation factor; inner arms rotate ~1/r * spinSpeed
-	discSpin = 0.04, // whole-disc rad/s on top of the per-vertex shear
+	spinSpeed = 0.18, // outward rotation factor; inner arms rotate ~1/r * spinSpeed
+	discSpin = 0.15, // whole-disc rad/s on top of the per-vertex shear (visible twirl)
 	behind = 14, // how far in front of the camera (just behind the play field) the disc sits
 }: {
 	count?: number
@@ -83,6 +89,11 @@ export function GalaxyBackground({
 	behind?: number
 } = {}) {
 	const root = useRef<Points>(null)
+	// Accumulated in-plane spin angle (rad). Incremented by `discSpin*delta`
+	// each frame and folded into the disc's orientation as a local-Z rotation
+	// on top of the camera-facing billboard — so the twirl accumulates
+	// independently of the billboard reset (see useFrame).
+	const spinAngle = useRef(0)
 
 	const { geometry, material, shaderHolder } = useMemo(() => {
 		// --- Geometry (journey 30's `generateGalaxy`, ported 1:1) ----------
@@ -159,8 +170,12 @@ export function GalaxyBackground({
 					float dist = length(position.xy);
 					// base polar angle of this point in the XY plane
 					float angle = atan(position.y, position.x);
-					// inner arms rotate faster (1/r) — the signature shear
-					angle += (1.0 / max(dist, 0.001)) * uTime * uSpinSpeed;
+					// inner-arm shear: inner points revolve faster than outer
+					// (the journey-30 signature). Clamp the min distance to
+					// 0.5 so core points don't spin to aliasing noise —
+					// the visible swirling motion is carried by the
+					// whole-disc rotateZ in JS plus this gentle shear.
+					angle += (1.0 / max(dist, 0.5)) * uTime * uSpinSpeed;
 					transformed.x = cos(angle) * dist;
 					transformed.y = sin(angle) * dist;
 				}
@@ -205,38 +220,45 @@ export function GalaxyBackground({
 		[material, geometry],
 	)
 
-	// Per-frame: advance the per-vertex rotation uniform from the shared
-	// `time` clock, and lock the galaxy to the camera as a true backdrop
-	// (billboarded + offset along the view-forward axis) so the swirl fills
-	// the whole frame at any camera pan with no parallax-warp / no twitch.
+	// Per-frame: lock the galaxy to the camera as a true backdrop
+	// (billboarded + offset along the view-forward axis) and accumulate the
+	// in-plane twirl. The JS whole-object spin is the *primary* visible motion
+	// (guaranteed across renderers — it's a matrix update, not a shader
+	// uniform) so the nebula visibly twirls like journey-30. The in-shader
+	// `uTime` per-vertex shear (bumped below) adds subtle inner-arm lead-lag
+	// on backends that honour `onBeforeCompile`; if it doesn't fire on this
+	// renderer the JS twirl still carries the animation.
 	useFrame((state, delta) => {
 		const u = shaderHolder.uniforms.uTime as { value: number } | undefined
 		if (u) {
 			u.value += Math.min(delta, 0.1)
 		}
 		if (root.current) {
-			// Billboard the disc to the camera: copy the camera's quaternion
-			// so the disc's +Z normal always faces the view. The apparent
-			// shape of the nebula stays constant as the camera pans/pitches
-			// following the orbit center → no frame-to-frame warp, hence no
-			// twitch when the game scrolls.
-			root.current.quaternion.copy(state.camera.quaternion)
+			// Accumulate the in-plane twirl across frames. We can't just call
+			// `rotateZ(delta*spin)` after billboard-copying the camera
+			// quaternion, because the billboard copy WIPES the accumulated spin
+			// every frame — the spin never builds up (each frame restarts from
+			// the camera's orientation, adding only one frame's worth
+			// ≈ 0.14° → invisible, reads as "static"). So we track the angle in
+			// a ref and rebuild the orientation each frame as
+			// `billboard * spin(angle)`.
+			spinAngle.current += delta * discSpin
+			// Billboard the disc to the camera: take the camera's quaternion so
+			// the disc's +Z normal always faces the view (constant apparent
+			// shape as the camera pans/pitches following the orbit center →
+			// no warp / no twitch when the game scrolls).
+			_camQuat.copy(state.camera.quaternion)
+			// Compose the accumulated in-plane spin ON TOP of the billboard
+			// (local-space Z rotation, which after the billboard means the disc's
+			// camera-facing plane rotates in-view = the journey-30 twirl).
+			_spinQuat.setFromAxisAngle(_SPIN_AXIS, spinAngle.current)
+			root.current.quaternion.copy(_camQuat).multiply(_spinQuat)
 			// Park the disc a fixed distance **in front of** the camera (just
-			// behind the play field) along the camera's own view-forward axis —
-			// NOT world -Z, so it stays framed as the orbit center pans/pitches.
-			// `getWorldDirection` returns the camera's forward (look) direction,
-			// so `+behind` moves along it, away from the camera, past the
-			// playfield at z~0 (camera is at z~12).
+			// behind the play field) along the camera's own view-forward axis.
 			state.camera.getWorldDirection(_viewDir)
 			root.current.position
 				.copy(state.camera.position)
 				.addScaledVector(_viewDir, behind)
-			// Global disc spin on top of the per-vertex 1/r shear so the arms
-			// sweep visibly across the full frame (the per-vertex shear alone
-			// only reads in the dense core). `rotateZ` is in the disc's *local*
-			// space (after the billboard copy its local +Z == camera forward),
-			// so this is an in-plane spin — the journey-30 twirl.
-			root.current.rotateZ(delta * discSpin)
 		}
 	})
 

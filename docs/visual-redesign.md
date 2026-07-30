@@ -518,33 +518,70 @@ energy scene. The HUD is DOM, so this is pure CSS — no scene changes. Goals:
 
 ### Step 7 — Visual tuning
 
-- **Glaxy twirl + scroll-twitch fix (iteration):** the per-vertex `1/r` swirl
-  alone was only visible in the dense core (the dense arms are a tiny dot at
-  `radius=34` against a camera at z=12). Shrunk the disc to `radius=18`,
-  bumped `spinSpeed` to `0.45`, and added a slow whole-disc `rotateZ(0.04)` on
-  top of the per-vertex shear so the arms sweep across the full frame — the
-  journey-30 twirl now reads at a glance. The scroll-twitch came from the disc
-  being offset purely on world `-Z` while the camera pitches (`lookAt`
-  follows the orbit center) → the face-on disc warped frame-to-frame. Now the
-  disc is **billboarded to the camera** (`quaternion.copy(camera.quaternion)`)
-  and parked along the camera's **own view-forward axis** at a fixed distance,
-  so its apparent shape is constant → no warp, no twitch on scroll.
-- **Orb pulsing core is now holographic + smaller + counter-spins.** The core
-  reuses `createHolographicMaterial` (with `pulse` option: brightness beats
-  `0.5 + 0.5*sin(time*1.8+phase)`) so it carries the same fresnel + stripes +
-  glitch hologram effect as the shell, tinted toward white. It is smaller
-  (~0.3× orb radius, down from 0.42×) and spins on x/y in the **opposite**
-  direction to the shell, so it reads as a distinct ticking energy bead inside
-  the orb rather than a mini-echo of the shell. `createHolographicMaterial`
-  gained a `pulse` option (`{speed, phase, floor, amp}`) that multiplies the
-  final alpha by `floor + amp*sin(time*speed+phase)` — orbs leave it off,
-  core uses it.
-- **Obstacles read more like jelly](translucent energy, less solid fill).**
-  Reduced per-kind `baseFill` (static 0.5 … moving 0.9, collision 2.4) so the
-  front face is a translucent scrolling-scanline field with a stronger
-  fresnel rim, not a solid panel. Diversified per-kind colors so they're no
-  longer all-blue: `static` cool slate-blue, `angular` cyan-teal, `moving`
-  purple, `angular_long` warm orange, collision yellow — distinct energies.
+- **Glaxy twirl + scroll-twitch fix (iteration 4, screenshot-009):** the
+  galaxy was showing as a static, non-animating image and visibly jumping when
+  the camera scrolled. Three root causes, three fixes:
+  1. **Stale camera read → scroll jump.** `<GalaxyBackground />` was mounted
+     BEFORE `<CameraController />` in `GameScene`, so among same-priority
+     `useFrame` subscribers (mount order) the galaxy copied `state.camera`
+     one frame stale. As the camera lerps following the orbit center,
+     pitching its `lookAt`, the one-frame-stale billboard quaternion
+     mis-aligned every frame → the visible jump. Moved
+     `<CameraController />` to mount **before** `<GalaxyBackground />` so the
+     galaxy reads the freshly-updated camera.
+  2. **Billboard reset wiped the accumulated spin → "static".** We were
+     doing `quaternion.copy(camera.quaternion)` then `rotateZ(delta*spin)`
+     every frame — but the copy **wipes** the prior frame's spin, so the spin
+     never accumulates (each frame restarts from the camera's orientation
+     and adds only one frame's worth ≈ 0.14° → invisible, reads as static).
+     Now the spin angle is tracked in a ref and the orientation is rebuilt
+     each frame as `billboardQuaternion * quaternionFromAxisAngle(z,
+     spinAngle)` — billboard stays (constant shape, no twitch) and the
+     in-plane twirl accumulates independently.
+  3. **No visible in-shader motion.** The per-vertex `1/r` swirl was aliased
+     to noise at the core (`1/max(dist,0.001)` spun inner points to
+     aliasing) and glacially slow on the outer arms. Clamped the per-vertex
+     min distance to `0.5` (kills the aliasing flicker). The **primary**
+     visible motion is now the JS whole-object spin (`discSpin = 0.15 rad/s`
+     ≈ 8.6°/s, accumulating per #2), which is guaranteed across renderers —
+     it's a matrix update, not an `onBeforeCompile` uniform (which the
+     `WebGPURenderer` WebGL backend may not rewrite reliably). The in-shader
+     `uTime` shear adds subtle inner-arm lead-lag on backends that honour
+     it; if not, the JS twirl still carries the animation.
+  Disc billboarded to the camera and parked
+  along the camera's view-forward axis at `behind=14`, with a very thin
+  in-plane Z thickness (~0.06) so no points stray near the near plane.
+- **Orb pulsing core is a true holographic shell matching the orb (screenshot-008→9):**
+  the core had been tinted ~70% toward white + given a `baseFill` body, which
+  made it read as a **solid white bead**, not a hologram. Now the core uses
+  `createHolographicMaterial` with the orb's **own identity color** and **no
+  `baseFill`** → pure fresnel + stripes + glitch shell, the same energy look
+  as the orb, just smaller (~0.30× orb radius) and pulsing (the `pulse`
+  option beats 0.5→1.0). It spins on x/y in the **opposite** direction to the
+  shell so the two hologram fields counter-rotate. Removed the now-unused
+  `whiteTint` helper.
+- **Orbit ring now renders THROUGH the orbs (screenshot-009):** the orbital
+  path ring was drawn before the orbs, so the orb bodies/cores painted over
+  it at the two crossing points — the ring "hid behind" the orbs. Moved the
+  ring `<mesh>` to render **last** in the orbit `<group>`; since its material
+  is additive + `depthTest:false` + `depthWrite:false`, its glow paints *over*
+  the orb bodies/cores at the crossings → the ring visibly passes through the
+  orbs (including the pulsing core) as requested.
+- **Obstacles are holographic boxes like the orbs, different colors (screenshot-008→009):**
+  iterations swung between "solid blue panel" (too much `baseFill`) and "empty
+  outline" (too little `baseFill` → looked nothing like the orb's hologram).
+  The orb's holographic look is a bright fresnel rim band + scrolling stripes
+  + glitch on a translucent shell; a box has no curved silhouette so its
+  fresnel only lights the silhouette edges. To make obstacles read as the
+  same energy language as the orbs, `baseFill` is now a moderate ~0.7–0.9
+  (collision 1.4) → the faces carry **visible scrolling scanlines** + a bright
+  **fresnel edge** + glitch jitter (jelly), without being a solid panel
+  (the pure fresnel alpha is 0 face-on, so the centre stays translucent and
+  the rim/edges dominate). Intensity bumped to orb-level (static 2.0 … moving
+  2.6, collision 3.0; orbs use 2.4) so the holographic field reads bright
+  against the dark backdrop. Per-kind colors are distinct: `static`
+  slate-blue, `angular` cyan-teal, `moving` purple, `angular_long` warm
+  orange, collision yellow.
 - **Background vs gameplay contrast**: galaxy palette cool/dim; orbs (red/blue)
   bright cores + halos so they read first. The orbit-path ring is bright so
   the rotation path stands out against the galaxy. Tune galaxy

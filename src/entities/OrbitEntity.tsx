@@ -77,20 +77,6 @@ export function OrbitEntity({ orbit, resolution }: OrbitEntityProps) {
 
 	return (
 		<group>
-			{/*
-				Orbit-path ring — a glowing additive annulus tracing the orbs'
-				rotation. `depthWrite` & `depthTest` are off on the ring material
-				(see `createOrbitRingMaterial`), so it never occludes the orbs
-				and never z-fights at the orb/ring intersection — it glows over
-				and through them as a translucent overlay. The orbs are drawn
-				after it in this group and, being brighter, read through the
-				ring. `RingGeometry` is native-XY so no rotation is needed.
-			*/}
-			<mesh position={center}>
-				<primitive object={ringGeometry} attach="geometry" />
-				<primitive object={ringMaterial} attach="material" />
-			</mesh>
-
 			{/* Orbit center anchor sphere */}
 			<mesh position={center}>
 				<sphereGeometry args={[centerRadius, 24, 16]} />
@@ -106,6 +92,21 @@ export function OrbitEntity({ orbit, resolution }: OrbitEntityProps) {
 					phase={index === 0 ? 0 : Math.PI / 2}
 				/>
 			))}
+
+			{/*
+				Orbit-path ring — a glowing additive annulus tracing the orbs'
+				rotation. Rendered LAST in this group on purpose: the ring's
+				material is additive with `depthTest:false` + `depthWrite:false`
+				(see `createOrbitRingMaterial`), so drawing it after the orbs
+				lets its glow paint *over* the orb bodies/cores at the two
+				points where the orbit path crosses each orb — the ring visibly
+				"passes through" the orbs rather than hiding behind them.
+				`RingGeometry` is native-XY so no rotation is needed.
+			*/}
+			<mesh position={center}>
+				<primitive object={ringGeometry} attach="geometry" />
+				<primitive object={ringMaterial} attach="material" />
+			</mesh>
 		</group>
 	)
 }
