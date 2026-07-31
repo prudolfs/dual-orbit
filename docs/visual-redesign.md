@@ -422,6 +422,21 @@ now; Step 6 no longer needs to revisit this.
 
 ### Step 4 — Galaxy background points ✅
 
+> **Update — twirl fix (iteration 5, see Step 7):** the implementation below
+> originally baked `aRandomness` into `position`, clamped the per-vertex min
+> distance, ran the per-vertex shear at `0.18×` and compensated with a
+> rigid `useFrame` Z-rotation of the whole `<points>` object. That produced a
+> "static rotating background", not the journey-30 **twirl** (differential
+> inner-vs-outer arm rotation). The current code instead keeps randomness as
+> a separate post-rotation `aRandomness` attribute, runs the per-vertex
+> `(1/dist)*uTime` shear at the reference's `1×` rate (no clamp), adds
+> per-vertex `aScale`, and drops the rigid whole-disc spin entirely — the
+> visible motion is now purely the per-vertex differential twirl. The
+> fragment soft-point mask also moved to the stock
+> `outgoingLight = diffuseColor.rgb;` line (`#include <output_fragment>` does
+> not exist in this `three` version). The narrative below is preserved for
+> history but reflects the pre-iteration-5 design.
+
 Created `src/scene/GalaxyBackground.tsx` — port of `threejs-journey/30-animated-galaxy/`.
 
 **Why stock `PointsMaterial` (with an `onBeforeCompile` patch) rather than
@@ -518,39 +533,112 @@ energy scene. The HUD is DOM, so this is pure CSS — no scene changes. Goals:
 
 ### Step 7 — Visual tuning
 
-- **Glaxy twirl + scroll-twitch fix (iteration 4, screenshot-009):** the
-  galaxy was showing as a static, non-animating image and visibly jumping when
-  the camera scrolled. Three root causes, three fixes:
+- **Galaxy twirl — iteration 5 (the actual fix).** Iteration 4 (below) made
+  the background look animated but it was the *wrong* motion: a rigid
+  whole-disc `rotateZ` of the `<points>` object ("spin"), with the journey-30
+  per-vertex `1/r` shear as secondary and 5× too slow. That reads as a
+  "static rotating background", not the journey-30 **twirl** (which is the
+  *differential* rotation — inner arms outrunning outer arms so the spiral
+  visibly winds/unwinds). Fixed by making the port faithful to the
+  reference _and_ adapting the geometry for our very different viewing
+  setup (billboarded flat disc, 5× the reference radius, gameplay embedded
+  at the disc center):
+  1. **Randomness is a separate `aRandomness` attribute added AFTER the
+     per-vertex rotation** (exactly like the reference's
+     `modelPosition.xyz += aRandomness`), NOT baked into `position`. Baking
+     randomness into `position` forced a `max(dist, 0.5)` clamp in the
+     shader (to stop near-center points from spinning to aliasing noise), and
+     that clamp **flattened the inner-arm shear** — the most dramatic part of
+     the twirl. With randomness separate, the rotation runs on the clean
+     spiral skeleton, the fuzz halo inherits the motion, no clamp is needed,
+     and the full `1/r` curve survives: a point at r=1 completes a revolution
+     in ~6 s while one at r=26 takes ~26 s — the visible shear.
+  2. **Rate restored to the reference's `1.0`→tuned `0.5`** (was multiplied
+     by `uSpinSpeed=0.18` — ~5× too slow). Now `angle += (1.0/dist) * uTime *
+     uSpin` with `uSpin=0.5` — the `1/r` differential is preserved so it is
+     still a twirl, not a rigid spin, just visible enough across the disc.
+  3. **Removed the rigid whole-disc spin entirely.** The `<points>` object
+     is now ONLY billboarded to the camera (constant apparent shape, no
+     scroll twitch); all visible motion is the per-vertex differential
+     twirl. A rigid rotateZ was actively masking the twirl by dominating
+     the motion budget.
+  4. **Per-vertex `aScale`** added (reference behaviour) for varied point
+     sizes, folded into the stock `PointsMaterial` `gl_PointSize = size *
+     aScale;` line so the built-in `sizeAttenuation` perspective falloff
+     still applies.
+  5. **Fixed the soft-point fragment mask too:** the previous code replaced
+     `#include <output_fragment>`, which **does not exist** in this `three`
+     version (the stock points fragment uses `#include <opaque_fragment>`, and
+     assigns `outgoingLight = diffuseColor.rgb;` *before* it). The silent
+     no-op left chunky-square points. Now masks `diffuseColor` _before_ the
+     stock `outgoingLight = diffuseColor.rgb;` line so the radial
+     `pow(1-d,10)` light-point actually affects output.
+  6. **No-clean-pie geometry (the iteration-6 regression fix).** The first
+     faithful port exposed a problem the reference doesn't have: with a
+     flat billboarded disc 5× the reference radius and gameplay sitting at
+     the disc's geometric center, the bare `positions = (cos·r, sin·r, 0)`
+     with `branches=N` placed `N` **un-blurred arm origins radiating from
+     the center** → the user saw the screen "divided in five pieces of pie
+     from center, no animated galaxy". The reference's small `radius=5` and
+     tilted viewing distance reads those clean inner arms as a tight core,
+     not pie slices; ours does not. Fixed by:
+     - **rim-biased radius**: `r = sqrt(rand) * radius` distributes points
+       uniformly per annular area (the reference's `rand*radius` would pack
+       the center); combined with the `+radius*0.18` fuzz floor this leaves
+       no clean arm skeleton at the center.
+     - **an absolute fuzz floor** in `aRandomness` (`randomness * (r +
+       radius*0.18)`, not `* r`): the `+radius*0.18` term gives inner-arm
+       points an *absolute* minimum scatter so the clean inner arm-origin
+       is blurred away.
+     - **a 45% pure-random halo** of points with no branch assignment at
+       all (`branchAngle = Math.random()*τ` instead of `i%branches/branches*τ`)
+       so the discrete `branches`-fold symmetry is buried in a continuous
+       fuzz — the eye reads a nebula, not N slices.
+     - **`branches` 5→8**, `randomnessPower` 2.4→2.0 (larger typical
+       offsets, denser fuzz band).
+     Verified by Playwright angular-autocorrelation probe: the broken
+     iter-5-SAUCER had a strong 5-fold brightness period (72°) at r~0.45R;
+     the fix has no preferred angular period at any radius (smooth nebula),
+     with ~20% of central-disc pixels still changing between frames 2 s
+     apart (max delta ~138) — genuine per-vertex motion survives.
+     `pow(1-d,10)` light-point actually affects output.
+
+  **Build/test status:** `npm run build` passes, shader compiles with zero
+  WebGL console errors, all 29 vitest scenarios pass. A new Playwright smoke
+  (`screenshots/galaxy-twirl.spec.ts`) loads the built game and confirms no
+  shader-compile / runtime errors; pixel probes confirm the galaxy is now a
+  smooth (no angular-periodicity) nebula that animates between frames.
+
+- **Galaxy twirl + scroll-twitch fix (iteration 4, screenshot-009 — superseded
+  above):** the galaxy was showing as a static, non-animating image and visibly
+  jumping when the camera scrolled. Three root causes, three fixes (the
+  scroll-twitch half is still valid; the twirl half was wrong and is
+  superseded by iteration 5):
   1. **Stale camera read → scroll jump.** `<GalaxyBackground />` was mounted
      BEFORE `<CameraController />` in `GameScene`, so among same-priority
      `useFrame` subscribers (mount order) the galaxy copied `state.camera`
      one frame stale. As the camera lerps following the orbit center,
      pitching its `lookAt`, the one-frame-stale billboard quaternion
-     mis-aligned every frame → the visible jump. Moved
-     `<CameraController />` to mount **before** `<GalaxyBackground />` so the
-     galaxy reads the freshly-updated camera.
+     mis-aligned every frame → the visible jump. Moved `<CameraController />`
+     to mount **before** `<GalaxyBackground />` so the galaxy reads the
+     freshly-updated camera. **(Still valid — kept.)**
   2. **Billboard reset wiped the accumulated spin → "static".** We were
      doing `quaternion.copy(camera.quaternion)` then `rotateZ(delta*spin)`
      every frame — but the copy **wipes** the prior frame's spin, so the spin
-     never accumulates (each frame restarts from the camera's orientation
-     and adds only one frame's worth ≈ 0.14° → invisible, reads as static).
-     Now the spin angle is tracked in a ref and the orientation is rebuilt
-     each frame as `billboardQuaternion * quaternionFromAxisAngle(z,
-     spinAngle)` — billboard stays (constant shape, no twitch) and the
-     in-plane twirl accumulates independently.
+     never accumulates. Fixed by tracking the angle in a ref and rebuilding
+     the orientation each frame as `billboardQuaternion *
+     quaternionFromAxisAngle(z, spinAngle)`. **(Superseded: the whole-object
+     spin is now removed in iteration 5; the twirl comes purely from the
+     per-vertex shader. The billboard is kept, with NO in-plane Z spin.)**
   3. **No visible in-shader motion.** The per-vertex `1/r` swirl was aliased
-     to noise at the core (`1/max(dist,0.001)` spun inner points to
-     aliasing) and glacially slow on the outer arms. Clamped the per-vertex
-     min distance to `0.5` (kills the aliasing flicker). The **primary**
-     visible motion is now the JS whole-object spin (`discSpin = 0.15 rad/s`
-     ≈ 8.6°/s, accumulating per #2), which is guaranteed across renderers —
-     it's a matrix update, not an `onBeforeCompile` uniform (which the
-     `WebGPURenderer` WebGL backend may not rewrite reliably). The in-shader
-     `uTime` shear adds subtle inner-arm lead-lag on backends that honour
-     it; if not, the JS twirl still carries the animation.
-  Disc billboarded to the camera and parked
-  along the camera's view-forward axis at `behind=14`, with a very thin
-  in-plane Z thickness (~0.06) so no points stray near the near plane.
+     to noise at the core and glacially slow on the outer arms, with the JS
+     whole-object spin doing all the visible work. **(Superseded: iteration 5
+     restores the per-vertex shear as the primary motion by separating
+     `aRandomness` post-rotation (no clamp needed) and dropping the speed
+     multiplier + rigid spin.)**
+  Disc billboarded to the camera and parked along the camera's view-forward
+  axis at `behind=14`, with a very thin in-plane Z thickness — **kept** in
+  iteration 5.
 - **Orb pulsing core is a true holographic shell matching the orb (screenshot-008→9):**
   the core had been tinted ~70% toward white + given a `baseFill` body, which
   made it read as a **solid white bead**, not a hologram. Now the core uses
