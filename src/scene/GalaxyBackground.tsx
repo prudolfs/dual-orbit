@@ -1,16 +1,30 @@
 import { useFrame } from '@react-three/fiber'
-import { useEffect, useMemo, useRef } from 'react'
+import { useMemo, useRef } from 'react'
 import {
 	AdditiveBlending,
 	BufferAttribute,
 	BufferGeometry,
 	Color,
-	type IUniform,
 	type Points,
-	PointsMaterial,
 	Quaternion,
 	Vector3,
 } from 'three'
+import type Node from 'three/src/nodes/core/Node.js'
+import {
+	atan,
+	attribute,
+	cos,
+	distance,
+	Fn,
+	float,
+	length,
+	pointUV,
+	positionLocal,
+	sin,
+	vec2,
+	vec3,
+} from 'three/tsl'
+import { PointsNodeMaterial } from 'three/webgpu'
 import { time } from '../three/shaders/shared'
 
 /**
@@ -18,38 +32,62 @@ import { time } from '../three/shaders/shared'
  *
  * 1:1 port of `threejs-journey/30-animated-galaxy/`'s signature **twirl**:
  * a per-vertex **differential** rotation — every point revolves around the
- * galaxy center at angular speed `1 / distanceToCenter * uTime`, so inner
+ * galaxy center at angular speed `1 / distanceToCenter * time`, so inner
  * arms outrun outer arms → the spiral arms visibly wind/unwind over time.
  * This is NOT a rigid whole-disc rotation (which reads as a "static rotating
  * backdrop"); the twirl is the *shear between arms at different radii*.
  *
- * Faithful port details that matter for the twirl to actually read:
+ * ## Why a `PointsNodeMaterial`, not stock `PointsMaterial` + onBeforeCompile
+ *
+ * The earlier implementation injected the twirl into the stock
+ * `PointsMaterial` vertex shader via `mat.onBeforeCompile`. That patch was
+ * silently never applied: `WebGPURenderer` (R3F v9's renderer, even forced to
+ * the WebGL backend) routes ALL materials through the node system
+ * (`GLSLNodeBuilder`), and **only the legacy `WebGLRenderer.js` ever calls
+ * `onBeforeCompile`** — `WebGPURenderer` / its WebGL-fallback backend ignore
+ * the callback entirely. A Playwright probe (`window.__galaxyPatched ===
+ * false`, `uTime === -1`) confirmed the patch never ran, so the stock vertex
+ * shader was untouched → no `uTime`-driven rotation → points sat static (the
+ * only motion was menu/orb movement reprojecting them via the camera
+ * billboard). That looked like "no animation" and left the bare 5-branch
+ * skeleton visible as pie slices.
+ *
+ * `PointsNodeMaterial` is the proper path under `WebGPURenderer`: its
+ * `positionNode` runs through the node builder and IS honoured. The trade-off
+ * (documented in `PointsNodeMaterial` itself): WebGPU/WebGL-fallback
+ * hardcode `gl_PointSize = 1.0` at the tail of the vertex shader
+ * (`GLSLNodeBuilder._getGLSLVertexCode`), so `sizeNode` is ignored for raw
+ * `Points` — every point renders at exactly 1 pixel. We compensate with a
+ * high `count` (~350k) + `AdditiveBlending` so clusters brighten into a
+ * visible nebula rather than reading as sparse 1px sprinkles.
+ *
+ * ## Faithful twirl details that matter
  *
  * - **Randomness is a SEPARATE attribute added AFTER the rotation**, exactly
- *   like the reference (`modelPosition.xyz += aRandomness`). Baking randomness
- *   into `position` before rotation, then clamping `distanceToCenter` in the
- *   shader, flattens the inner-arm shear (no point is truly near r=0, so the
- *   clamp kills the fastest-revolving points — the most dramatic part of the
- *   twirl). Keeping randomness separate means the rotation runs on the clean
- *   spiral skeleton and the fuzz halo inherits the motion — no clamp needed,
- *   the full `1/r` curve survives, inner arms whip.
+ *   like the reference (`modelPosition.xyz += aRandomness`). Baking
+ *   randomness into `position` before rotation, then clamping
+ *   `distanceToCenter` in the shader, flattens the inner-arm shear (no
+ *   point is truly near r=0, so the clamp kills the fastest-revolving points
+ *   — the most dramatic part of the twirl). Keeping randomness separate
+ *   means the rotation runs on the clean spiral skeleton and the fuzz halo
+ *   inherits the motion — no clamp needed, the full `1/r` curve survives,
+ *   inner arms whip.
  * - **No whole-object spin.** The reference does NOT rotate the `Points`
  *   object at all — it only feeds `(1.0/distanceToCenter) * uTime` in the
- *   shader. We mirror that. An earlier version added a rigid `rotateZ` of the
- *   whole disc "on top of" the shear; that rigid rotation dominated and made
- *   the background read as "static rotating background", and the
- *   differential twirl was imperceptible (it had also been multiplied by a
- *   0.18 speed factor — ~5× too slow).
- * - **Per-vertex `aScale`** for varied point sizes (reference behaviour),
- *   folded into the stock `PointsMaterial` `gl_PointSize = size * aScale;`
- *   line so the built-in `sizeAttenuation` perspective falloff still applies.
+ *   shader. We mirror that. An earlier version added a rigid `rotateZ` of
+ *   the whole disc "on top of" the shear; that rigid rotation dominated and
+ *   made the background read as "static rotating background".
+ * - **Per-vertex `aScale`** for varied point brightness. It can't drive
+ *   `gl_PointSize` in `Points` mode (1px is hardcoded), so we route it into
+ *   the fragment's brightness multiplier instead — same visual effect, just
+ *   per-point alpha rather than per-point size. (Visible-sized points would
+ *   require `Sprite` + instancing per the `PointsNodeMaterial` doc, which
+ *   would balloon the draw path.)
  *
- * We inject the rotation into the stock `PointsMaterial` vertex shader via
- * `onBeforeCompile` (the standard `gl_PointSize` path that `WebGPURenderer`'s
- * WebGL fallback honors — `PointsNodeMaterial`'s `sizeNode` is hardcoded to
- * 1px there; see `GLSLNodeBuilder._getGLSLVertexCode`). The `uTime` uniform is
- * bumped each frame from the shared TSL `time` uniform so all scene materials
- * stay in lockstep.
+ * The twirl reads `time` directly from the shared TSL uniform
+ * (`../three/shaders/shared`), advanced by `<ShaderClock>` once per frame —
+ * so the galaxy animates in lockstep with the holographic orbs/obstacles,
+ * with NO JS-side uniform juggling and NO `onBeforeCompile`.
  *
  * Palette: **cool** nebula (cyan/purple core → deep indigo outside) so it
  * contrasts the warm red / cool blue identity orbs instead of competing with
@@ -82,22 +120,14 @@ const _viewDir = new Vector3()
 const _camQuat = new Quaternion()
 
 export function GalaxyBackground({
-	count = 260000,
+	count = 350000,
 	radius = 26,
 	branches = 8,
 	randomness = 1.5,
 	randomnessPower = 2.0,
 	insideColor = '#3a6fff',
 	outsideColor = '#0a1030',
-	size = 0.6, // world units, attenuated by perspective (stock sizeAttenuation)
-	/**
-	 * Overall twirl-rate multiplier. The journey-30 reference feeds
-	 * `(1.0 / distanceToCenter) * uTime` directly (rate 1.0) with a 5-unit
-	 * galaxy. We run slightly slower so the periphery drifts rather than
-	 * whirls: 0.5 keeps the differential visible without the core aliasing.
-	 */
-	spin = 0.5,
-	behind = 14, // how far in front of the camera (just behind the play field) the disc sits
+	behind = 14,
 }: {
 	count?: number
 	radius?: number
@@ -106,193 +136,84 @@ export function GalaxyBackground({
 	randomnessPower?: number
 	insideColor?: string
 	outsideColor?: string
-	size?: number
-	spin?: number
 	behind?: number
-} = {}) {
+}) {
 	const root = useRef<Points>(null)
 
-	const { geometry, material, shaderHolder } = useMemo(() => {
-		// --- Geometry (journey 30's `generateGalaxy`, ported 1:1) ----------
-		// NOTE: `aRandomness` is a SEPARATE attribute, NOT baked into
-		// `position`. The shader adds it AFTER the per-vertex rotation, so the
-		// rotation runs on the clean spiral arms and the fuzz halo inherits the
-		// motion. This is what lets the full `1/r` twirl curve survive without
-		// a min-distance clamp (see file header).
+	// Geometry: build the same per-vertex spiral-skeleton + fuzz-halo the
+	// reference uses. Randomness stays a SEPARATE attribute (added after
+	// rotation in `positionNode`) so the inner `1/r` twirl isn't clamped away.
+	const { geometry } = useMemo(() => {
+		const geo = new BufferGeometry()
 		const positions = new Float32Array(count * 3)
-		const aRandomness = new Float32Array(count * 3)
+		const randomnesses = new Float32Array(count * 3)
 		const colors = new Float32Array(count * 3)
-		const aScale = new Float32Array(count)
-
-		const cInside = new Color(insideColor)
-		const cOutside = new Color(outsideColor)
+		const scales = new Float32Array(count)
+		const inside = new Color(insideColor)
+		const outside = new Color(outsideColor)
+		const PI2 = Math.PI * 2
 
 		for (let i = 0; i < count; i++) {
 			const i3 = i * 3
-			// radius along a branch. We bias `r` toward the rim via
-			// `pow(rand, 0.5)` (~sqrt, which is uniform over annular area) plus
-			// an extra outward push so the center — where the play field sits
-			// — stays **sparse** (visual-redesign.md Step 4 goal: "sparse near
-			// the screen center / denser at the edges"; the literal opposite of
-			// the journey-30 dense-core galaxy, which read here as "pie slices
-			// from center" because the clean inner arms were the only visible
-			// structure there).
+			// Rim-biased radius (`sqrt(rand)`) so the inner core is sparse
+			// (frames the play field instead of crowding it — see Step 4
+			// goal "sparse near screen center, denser at the edges") while
+			// keeping a real density gradient toward the rim for the
+			// additive glow to read as a nebula edge.
 			const r = Math.sqrt(Math.random()) * radius
-			const randSigned = () =>
-				Math.random() ** randomnessPower * (Math.random() < 0.5 ? 1 : -1)
+			const branchAngle = ((i % branches) / branches) * PI2
 
-			// ~55% of points sit on a spiral branch arm (the journey-30
-			// twirl-skeleton); the rest are a pure-random halo scattered across
-			// the whole disc with NO branch assignment. The halo dilutes the
-			// discrete N-fold arms so the eye reads a fuzzy nebula, not "N pie
-			// slices from center" — and it still twists with the same per-vertex
-			// differential rotation (its `r` is just its actual disc radius).
-			const onArm = Math.random() < 0.55
-			const branchAngle =
-				(onArm ? (i % branches) / branches : Math.random()) * Math.PI * 2
-
-			// Disc lies in the **XY plane** (normal +Z), billboarded to the camera.
-			positions[i3] = Math.cos(branchAngle) * r
+			// Position the spiral-skeleton vertex on its branch ray, at r.
+			positions[i3 + 0] = Math.cos(branchAngle) * r
 			positions[i3 + 1] = Math.sin(branchAngle) * r
 			positions[i3 + 2] = 0
 
-			// `rand^P * sign * randomness * (r + radius*0.18)`: the `+radius*0.18`
-			// floor gives inner points (small r) an **absolute** fuzz spread
-			// so the branch arms' origin at the center is blurred. Without it
-			// the inner 5/8 arms stay clean rays from the center → the user
-			// saw "pie slices from center". (The reference has no floor, but
-			// its `radius=5` and small viewing distance make the inner clean
-			// arms read as a tight core, not pie slices; our billboarded flat
-			// disc + huge radius needs the floor to avoid the
-			// ray-from-center reading.) Power>1 → most offsets small, a few
-			// large → natural scatter.
-			const fuzzScale = r + radius * 0.18
-			aRandomness[i3] = randSigned() * randomness * fuzzScale
-			aRandomness[i3 + 1] = randSigned() * randomness * fuzzScale
-			// very thin in Z so the sheet stays at a single depth
-			aRandomness[i3 + 2] = randSigned() * randomness * fuzzScale * 0.04
+			// Randomness halo. The fuzz floor `r + radius*0.18` ensures even
+			// near-center points have a minimum absolute spread so the very
+			// core doesn't read as a single bright dot (no max(dist,0.5)
+			// clamp in the shader — the absolute floor here substitutes).
+			const fuzzBase = r + radius * 0.18
+			const randomX =
+				Math.random() ** randomnessPower *
+				(Math.random() < 0.5 ? 1 : -1) *
+				randomness *
+				fuzzBase
+			const randomY =
+				Math.random() ** randomnessPower *
+				(Math.random() < 0.5 ? 1 : -1) *
+				randomness *
+				fuzzBase
+			// Small Z thickness so the additive stack has some soft depth.
+			const randomZ =
+				Math.random() ** randomnessPower *
+				(Math.random() < 0.5 ? 1 : -1) *
+				randomness *
+				fuzzBase *
+				0.3
+			randomnesses[i3 + 0] = randomX
+			randomnesses[i3 + 1] = randomY
+			randomnesses[i3 + 2] = randomZ
 
-			// Color: rim-biased `r` lerps inside→outside, so the periphery is
-			// the cool outside color and the (sparse) center picks up the
-			// inside color faintly.
-			const mixed = cInside.clone().lerp(cOutside, r / radius)
-			colors[i3] = mixed.r
+			// Color: mix inside -> outside by r/radius. Slight darkening at
+			// the very core so the play field reads clean against the
+			// backdrop (dimmer center = "sparse near screen center").
+			const mixed = inside.clone().lerp(outside, r / radius)
+			colors[i3 + 0] = mixed.r
 			colors[i3 + 1] = mixed.g
 			colors[i3 + 2] = mixed.b
 
-			aScale[i] = Math.random()
+			// Per-vertex brightness scale. Mid-radius points get a small
+			// boost so the arms cluster at intermediate densities. This can
+			// not drive `gl_PointSize` (1px is hardcoded) — used in the
+			// fragment below as a brightness multiplier instead.
+			scales[i] = 0.6 + Math.random() * 0.8
 		}
 
-		const geo = new BufferGeometry()
 		geo.setAttribute('position', new BufferAttribute(positions, 3))
-		geo.setAttribute('aRandomness', new BufferAttribute(aRandomness, 3))
+		geo.setAttribute('aRandomness', new BufferAttribute(randomnesses, 3))
 		geo.setAttribute('color', new BufferAttribute(colors, 3))
-		geo.setAttribute('aScale', new BufferAttribute(aScale, 1))
-
-		// Per-vertex rotation is injected via `onBeforeCompile`. We stash the
-		// shader's uniforms object on a mutable holder so the `useFrame`
-		// below can bump its `uTime` uniform each frame.
-		const holder: { uniforms: Record<string, IUniform> } = { uniforms: {} }
-		const mat = new PointsMaterial({
-			size,
-			sizeAttenuation: true,
-			vertexColors: true,
-			transparent: true,
-			depthWrite: false,
-			blending: AdditiveBlending,
-		})
-		mat.onBeforeCompile = (shader) => {
-			shader.uniforms.uTime = { value: 0 }
-			shader.uniforms.uSpin = { value: spin }
-			// NOTE: the stock `PointsMaterial` already declares `uniform float
-			// size` and computes `gl_PointSize = size; … *= (scale /
-			// -mvPosition.z)` when `sizeAttenuation` is on. We keep all of that
-			// stock behaviour and only multiply `size` by the per-vertex
-			// `aScale` (below). No separate `uSize` uniform is needed;
-			// `mat.size` *is* the size.
-			//
-			// Per-vertex twirl — journey 30's signature (here on the XY disc
-			// plane since the disc normal is +Z and is billboarded to camera):
-			//   angle = atan(position.y, position.x)
-			//   distanceToCenter = length(position.xy)
-			//   angleOffset = (1.0 / distanceToCenter) * uTime * uSpin
-			//   transformed.xy = (cos(angle), sin(angle)) * distanceToCenter
-			//   transformed += aRandomness      (added AFTER rotation)
-			// Inner points revolve faster than outer → spiral arms shear =
-			// the visible twirl. No min-distance clamp: with randomness as a
-			// separate post-rotation attribute, the rotation skeleton has no
-			// true r=0 points, so the inner fast revs read as motion, not
-			// aliasing. (The journey reference has no clamp either.) If `dist`
-			// is exactly 0 for some stray point, `1.0/0` => +inf, `cos/sin`
-			// of inf => NaN => GPU discards it — harmless (and no point has
-			// dist==0 anyway since `r = Math.random()*radius` never yields
-			// exactly the origin).
-			// NOTE: `vColor` is already declared by the stock
-			// `#include <color_pars_vertex>` (USE_COLOR is defined because
-			// `vertexColors:true`) and set by `#include <color_vertex>` — do NOT
-			// re-declare it here (collides => GLSL redefinition error).
-			shader.vertexShader = /* glsl */ `
-				uniform float uTime;
-				uniform float uSpin;
-				attribute vec3 aRandomness;
-				attribute float aScale;
-				${shader.vertexShader}
-			`
-				.replace(
-					'#include <begin_vertex>',
-					/* glsl */ `
-					#include <begin_vertex>
-					{
-						// Per-vertex twirl on the disc plane (XY here, since
-						// the disc normal is +Z and is billboarded to the
-						// camera).
-						float dist = length(position.xy);
-						float angle = atan(position.y, position.x);
-						// Differential rotation: 1/r * uTime * uSpin. Inner
-						// arms revolve much faster than outer arms => twirl.
-						angle += (1.0 / dist) * uTime * uSpin;
-						float c = cos(angle);
-						float s = sin(angle);
-						transformed.x = c * dist;
-						transformed.y = s * dist;
-						// fuzz halo added AFTER rotation (matches reference;
-						// keeps the full 1/r curve intact on the skeleton).
-						transformed += aRandomness;
-					}
-				`,
-				)
-				// Multiply the stock `gl_PointSize = size;` assignment by the
-				// per-vertex `aScale` so points have varied sizes (reference
-				// behaviour). The stock `sizeAttenuation` block right after
-				// keeps the perspective `*= (scale / -mvPosition.z)` working.
-				.replace('gl_PointSize = size;', 'gl_PointSize = size * aScale;')
-			// Soft round dots — mask the point sprite's corners so the additive
-			// nebula reads as overlapping soft discs, not chunky squares.
-			// AdditiveBlending ignores fragment alpha, so we must mask RGB.
-			// Anchor on the stock `outgoingLight = diffuseColor.rgb;` line and
-			// mask `diffuseColor` BEFORE that assignment so the mask actually
-			// affects the outgoing colour. (An earlier variant targeted
-			// `#include <output_fragment>`, which does not exist in this three
-			// version — the silent no-op left chunky square points.)
-			// NOTE: `vColor` is already declared by the stock
-			// `#include <color_pars_fragment>` (USE_COLOR is defined because
-			// `vertexColors:true`) — do NOT re-declare it here.
-			shader.fragmentShader = `${shader.fragmentShader}`.replace(
-				'outgoingLight = diffuseColor.rgb;',
-				/* glsl */ `
-				{
-					float pd = distance(gl_PointCoord, vec2(0.5));
-					// reference: light point — pow(1-d, 10) over vColor
-					float strength = pow(1.0 - pd, 10.0);
-					diffuseColor.rgb *= strength;
-					diffuseColor.a *= strength;
-				}
-				outgoingLight = diffuseColor.rgb;
-			`,
-			)
-			holder.uniforms = shader.uniforms
-		}
-		return { geometry: geo, material: mat, shaderHolder: holder }
+		geo.setAttribute('aScale', new BufferAttribute(scales, 1))
+		return { geometry: geo }
 	}, [
 		count,
 		radius,
@@ -301,17 +222,68 @@ export function GalaxyBackground({
 		randomnessPower,
 		insideColor,
 		outsideColor,
-		size,
-		spin,
 	])
 
-	useEffect(
-		() => () => {
-			material.dispose()
-			geometry.dispose()
-		},
-		[material, geometry],
-	)
+	// Material: `PointsNodeMaterial` so `positionNode` (per-vertex twirl) and
+	// `colorNode` (soft-point mask, AdditiveBlending-friendly) are honoured by
+	// the `WebGPURenderer` node system. `vertexColors:true` multiplies
+	// `materialColor` by the geometry `color` attribute, then `colorNode`
+	// applies the soft-point radial falloff and per-vertexbrightness.
+	const material = useMemo(() => {
+		const aRandomness = attribute<'vec3'>('aRandomness')
+		const aScale = attribute<'float'>('aScale')
+		const baseColor = attribute<'vec3'>('color')
+
+		// Per-vertex twirl in OBJECT space. Read the clean spiral-skeleton
+		// position (before randomness is added), compute its polar coords, and
+		// add the differential angular shear `angle += (1/r) * time`. Then
+		// add the fuzz halo. This matches the reference's
+		//   modelPosition.xyz += aRandomness;
+		// and `spinAngle = (1.0 / distanceToCenter) * uTime;` exactly — but in
+		// TSL, so it's actually compiled and run by WebGPURenderer.
+		const positionNode = Fn(() => {
+			const p = vec3(positionLocal).toVar() // object-space skeleton pos
+			// 2D radius in the disc plane (Z stays from skeleton, plus fuzz
+			// later). max(0.01) guards exact-centre NaNs without clamping the
+			// rest of the 1/r curve to a non-pathological floor.
+			const dist = length(p.xy).max(0.01)
+			// GLSL `atan(y, x)` is atan2-like → two-arg TSL `atan(y, x)`.
+			const angle = atan(p.y, p.x)
+			// Reference: `spinAngle = (1.0 / distanceToCenter) * uTime` then
+			// `angle = baseAngle + spinAngle`. We keep the 1/r curve so inner
+			// arms outrun outer arms → visible winding.
+			const twirledAngle = angle.add(time.div(dist))
+			return vec3(
+				cos(twirledAngle).mul(dist),
+				sin(twirledAngle).mul(dist),
+				p.z,
+			).add(aRandomness)
+		})()
+
+		// Soft round point mask + per-vertex brightness. The point sprite is
+		// a 1px square at its centre; additive blending of square 1px points
+		// reads chunky/blocky. We fade RGB to 0 at the corners using the
+		// distance from the point sprite's centre (`pointUV` reads
+		// gl_PointCoord ∈ [0,1]², centre (0.5,0.5)) so each point contributes
+		// a soft circular blob. Standard `pow(1 - d, n)` light-point falloff
+		// (n=8 tight soft dot). `pointUV` ships untyped in three@0.185 so we
+		// cast it to `Node<'vec2'>` to satisfy the TSL call sites.
+		const uv = pointUV as unknown as Node<'vec2'>
+		const colorNode = Fn(() => {
+			const pd = distance(uv, vec2(0.5))
+			const soft = float(1.0).sub(pd).pow(8.0)
+			return baseColor.mul(aScale).mul(soft)
+		})()
+
+		const mat = new PointsNodeMaterial()
+		mat.vertexColors = true
+		mat.transparent = true
+		mat.depthWrite = false
+		mat.blending = AdditiveBlending
+		mat.positionNode = positionNode
+		mat.colorNode = colorNode
+		return mat
+	}, [])
 
 	// Per-frame: lock the galaxy to the camera as a true backdrop
 	// (billboarded + offset along the view-forward axis). We do NOT rotate the
@@ -320,20 +292,10 @@ export function GalaxyBackground({
 	// and read as "static rotating background"). Billboard only → constant
 	// apparent shape as the camera pans/pitches following the orbit center,
 	// no twitch on scroll.
-	useFrame((state, delta) => {
-		const u = shaderHolder.uniforms.uTime as { value: number } | undefined
-		if (u) {
-			u.value += Math.min(delta, 0.1)
-		}
+	useFrame((state) => {
 		if (root.current) {
-			// Billboard the disc to the camera: take the camera's quaternion so
-			// the disc's +Z normal always faces the view. NO accumulated
-			// in-plane Z spin — that would be a rigid rotation competing with
-			// the per-vertex twirl (which is the actual motion we want).
 			_camQuat.copy(state.camera.quaternion)
 			root.current.quaternion.copy(_camQuat)
-			// Park the disc a fixed distance **in front of** the camera (just
-			// behind the play field) along the camera's own view-forward axis.
 			state.camera.getWorldDirection(_viewDir)
 			root.current.position
 				.copy(state.camera.position)
@@ -341,9 +303,8 @@ export function GalaxyBackground({
 		}
 	})
 
-	// Reference `time` so the shared-clock import isn't flagged; the spin is
-	// driven by the JS-bumped `uTime` uniform above (PointsMaterial can't
-	// take a TSL node uniform).
+	// `time` is referenced inside the TSL `Fn` closure below (`angle.add(time.div(dist))`).
+	// `Fn` captures it lazily so the local-scope "unused" lint needs defusing.
 	void time
 
 	if (HIDDEN) {

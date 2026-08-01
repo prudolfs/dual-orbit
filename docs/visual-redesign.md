@@ -609,6 +609,94 @@ energy scene. The HUD is DOM, so this is pure CSS — no scene changes. Goals:
   shader-compile / runtime errors; pixel probes confirm the galaxy is now a
   smooth (no angular-periodicity) nebula that animates between frames.
 
+- **Galaxy twirl — iteration 7 (the real fix: shader never ran under
+  `WebGPURenderer`).** Iterations 5/6 *were* the correct algorithm but the
+  implementation routed the twirl into a stock `PointsMaterial` via
+  `mat.onBeforeCompile` — and that patch was silently **never compiled**.
+  `WebGPURenderer` (R3F v9's renderer, even forced to the WebGL backend via
+  `forceWebGL: true`) routes ALL materials through the node system
+  (`GLSLNodeBuilder`); only the legacy `WebGLRenderer.js` ever calls
+  `onBeforeCompile`, and `WebGPURenderer` / its WebGL-fallback backend ignore
+  the callback entirely. A Playwright probe wrote `window.__galaxyPatched =
+  !!uniforms.uTime` from the `useFrame` and read it back as `false`, with
+  `uTime` registered as `-1` every frame — the patch never ran, the stock
+  vertex shader was untouched, so no `uTime`-driven rotation ever executed.
+  The only motion the user ever saw was menu/orb movement reprojecting the
+  static, billboarded points via the camera — which read as "no animation",
+  and left the bare 5-branch skeleton visible as static pie wedges.
+
+  Fix: port the twirl to a TSL `PointsNodeMaterial` so the node builder
+  actually compiles it:
+  - `mat.positionNode = Fn(() => { const p = vec3(positionLocal).toVar();
+    const dist = length(p.xy).max(0.01); const angle = atan(p.y, p.x)
+      .add(time.div(dist)); return vec3(cos(angle).mul(dist),
+      sin(angle).mul(dist), p.z).add(aRandomness); })()` — the exact 1/r
+    differential twirl of the reference, expressed as a TSL node. `time`
+    is the shared TSL uniform advanced by `<ShaderClock>`, so the galaxy
+    animates in lockstep with the holographic orbs/obstacles — no JS-side
+    uniform juggling, no `onBeforeCompile`.
+  - `mat.colorNode = Fn(() => { const pd = distance(pointUV, vec2(0.5));
+    const soft = float(1.0).sub(pd).pow(8.0); return
+    attribute<'vec3'>('color').mul(attribute<'float'>('aScale')).mul(soft);
+    })()` — the soft-point radial falloff (replaces the previous
+    `outgoingLight = diffuseColor.rgb;` string patch, which never existed
+    in the WebGPURenderer pipeline).
+  - `vertexColors: true`, `transparent: true`, `depthWrite: false`,
+    `blending: AdditiveBlending` — same backdrop contract as before.
+
+  **Trade-off (documented in `PointsNodeMaterial` itself):** WebGPU and its
+  WebGL-fallback hardcode `gl_PointSize = 1.0` at the tail of the vertex
+  shader (`GLSLNodeBuilder._getGLSLVertexCode`), so `sizeNode` is ignored
+  for raw `Points` — every point renders at exactly 1 pixel. We compensate
+  with a higher `count` (~350 k, up from 260 k) so overlapping additive 1px
+  points clusters brighten into a visible nebula rather than reading as
+  sparse 1px sprinkles. Visible-sized points would require `Sprite` +
+  instancing per the `PointsNodeMaterial` doc.
+
+  **Verification (Playwright 1280×720, frame-a vs frame-b 1.5 s apart):**
+  shader compiles with zero WebGL console errors; bright-pixel motion now
+  extends radially out to ~60% of the frame radius (20–37% of pixels change
+  per band in r=[10%,60%], dropping to 0% only at the very edges where the
+  disc has faded into the clear color) — versus iteration 5 which only moved
+  the inner 200×200 px (orb area) at ~20% and 0% everywhere else. Angular
+  brightness distribution is now smooth (6–13% variance, no angular
+  periodicity) — the bare 5-arm skeleton that read as pie wedges is gone,
+  replaced by additive-blended 1px points whose density follows the
+  rim-biased spiral + fuzz halo of iteration 6.
+
+  ## Still suboptimal: 1px-point limitation + visual tuning harness
+
+  The remaining complaint ("looks like white noise, only blue, no twirl")
+  is a consequence of the 1px-point hardcode (`WebGPURenderer`'s
+  WebGL-fallback forces `gl_PointSize = 1.0` regardless of `sizeNode`). The
+  `PointsNodeMaterial` doc itself recommends using `Sprite` + instancing
+  for visible-sized points — a path we haven't taken yet. With 350 k 1px
+  additive points, the twirl doesn't read at the production billboarded
+  scale because individual arms are sub-pixel at most view angles.
+
+  To iterate toward the right look without burning cycles on
+  build→screenshot→human-check loops, `src/debug/GalaxyDebug.tsx` mounts a
+  standalone tuning scene at `/?galaxydebug`:
+  - A free `OrbitControls` camera over the disc (so you can find a view that
+    reveals the twirl off-axis — the reference's `(3,3,3)`-looking-at-origin
+    is the canonical "the spiral reads" view).
+  - A `lil-gui` panel exposing the exact same knobs as the reference
+    (`count, radius, branches, randomness, randomnessPower, insideColor,
+    outsideColor`) plus our `spin` and the camera's `offAxis*` params, with
+    `onFinishChange` regenerating the geometry. `spin` is a live uniform so
+    you can scrub it without rebuild.
+  - Same TSL `PointsNodeMaterial` and `time` shared uniform the production
+    `GalaxyBackground` uses (no onBeforeCompile, runs on the node builder
+    under `WebGPURenderer`), so whatever look you dial here applies 1:1 to
+    the game once you copy the parameters into `GalaxyBackground` defaults.
+  - Route wired into `src/App.tsx` (`?galaxydebug` switches to a debug
+    `<Canvas>` with `<RenderLoop />`); the regular game path is untouched.
+
+  Next step (after tuning): port the `Sprite` + instancing path for
+  visible-sized bright points so the twirl reads at the production
+  billboarded scale. Or alternatively, render the galaxy through a legacy
+  `WebGLRenderer` to recover `gl_PointSize = size * (1/-z)` attenuation.
+
 - **Galaxy twirl + scroll-twitch fix (iteration 4, screenshot-009 — superseded
   above):** the galaxy was showing as a static, non-animating image and visibly
   jumping when the camera scrolled. Three root causes, three fixes (the

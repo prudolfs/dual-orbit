@@ -1,5 +1,6 @@
 import { Canvas, useFrame } from '@react-three/fiber'
 import { useEffect, useRef, useState } from 'react'
+import { DEFAULT_TUNING, GalaxyDebug } from './debug/GalaxyDebug'
 import { driveFrame, installBotIfDev } from './game/bot/installer'
 import {
 	advanceFixedSimulation,
@@ -12,6 +13,28 @@ import { createWebGPURenderer, RenderLoop } from './three/WebGPUCanvas'
 import './App.css'
 
 function App() {
+	const galaxyDebug =
+		typeof window !== 'undefined'
+			? new URLSearchParams(window.location.search).has('galaxydebug')
+			: false
+
+	if (galaxyDebug) {
+		return (
+			<main className="game-shell" style={{ padding: 0 }}>
+				<section
+					className="game-stage"
+					aria-label="Galaxy tuning debug"
+					style={{ position: 'relative' }}
+				>
+					<GalaxyDebug tuning={DEFAULT_TUNING} />
+				</section>
+			</main>
+		)
+	}
+	return <Game />
+}
+
+function Game() {
 	const [simulation, setSimulation] = useState<SimulationState>(() =>
 		createMenuSimulation(),
 	)
