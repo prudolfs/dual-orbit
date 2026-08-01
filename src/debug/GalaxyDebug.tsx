@@ -96,14 +96,19 @@ function useGalaxyMaterial() {
 		const aScale = attribute<'float'>('aScale')
 		const baseColor = attribute<'vec3'>('color')
 
-		// Per-vertex differential twirl in OBJECT space, around the Y axis.
+		// Per-vertex **differential** twirl in OBJECT space, around the Y axis.
 		//   angle = atan(p.z, p.x) + (1 / dist) * time * spin
 		//   dist  = length(p.xz)
-		// (XZ-plane disc, Y is up — matches the reference orientation.)
+		// The 1/dist factor is THE twirl: inner particles rotate faster than
+		// outer ones, so the spiral arms shear (differential shear), exactly
+		// like the reference's `angleOffset = (1.0 / distanceToCenter) *
+		// uTime`. A flat `time*spin` ramp would just rigidly rotate the whole
+		// disc (reads as "rotating lines", not a twirl). (XZ-plane disc, Y
+		// is up — matches the reference orientation.)
 		const positionNode = Fn(() => {
 			const p = vec3(positionLocal).toVar()
 			const dist = length(p.xz).max(0.01)
-			const angle = atan(p.z, p.x).add(time.mul(spin))
+			const angle = atan(p.z, p.x).add(time.mul(spin).div(dist))
 			return vec3(cos(angle).mul(dist), p.y, sin(angle).mul(dist)).add(
 				aRandomness,
 			)
