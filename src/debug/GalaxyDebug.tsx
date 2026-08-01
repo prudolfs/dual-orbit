@@ -1,58 +1,52 @@
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
-	AdditiveBlending,
-	BufferAttribute,
-	BufferGeometry,
 	Color,
-	type Points as PointsObject,
+	DynamicDrawUsage,
+	InstancedBufferAttribute,
+	type InstancedMesh,
+	PlaneGeometry,
 } from 'three'
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js'
 import GUI from 'three/examples/jsm/libs/lil-gui.module.min.js'
-import type Node from 'three/src/nodes/core/Node.js'
-import {
-	atan,
-	attribute,
-	cos,
-	distance,
-	Fn,
-	float,
-	length,
-	pointUV,
-	positionLocal,
-	sin,
-	vec2,
-	vec3,
-} from 'three/tsl'
-import { PointsNodeMaterial } from 'three/webgpu'
+import { createGalaxyMaterial, galaxySpin } from '../three/materials/galaxy'
+import { ShaderClock } from '../three/ShaderClock'
 import { createWebGPURenderer, RenderLoop } from '../three/WebGPUCanvas'
 
 /**
- * Standalone galaxy-tuning debug scene, mounted when `?galaxydebug` is in
- * the URL (see `src/App.tsx`). It mirrors the reference
- * `threejs-journey/30-animated-galaxy/src/` exactly:
+ * Standalone galaxy-tuning debug scene, mounted when `?galaxydebug` is in the
+ * URL (see `src/App.tsx`). It uses the EXACT same `createGalaxyMaterial`
+ * and the EXACT same geometry builder the production `<GalaxyBackground>` uses
+ * (an `<instancedMesh>` of billboarded quads), so whatever look you dial here
+ * applies 1:1 to the game once you copy the parameters back into
+ * `GalaxyBackground` defaults.
  *
- * - The galaxy disc sits in the **XZ plane** (Y is the spin axis), with
- *   `randomness` etc. faithful to the reference geometry.
- * - A free `OrbitControls` camera lets you see the galaxy off-axis — the
- *   signature **twirl** only reads when the disc is foreshortened by
- *   perspective (with the disc perfectly face-on the spiral arms are
- *   symmetric and read as concentric circles). The reference's
- *   `OrbitControls` at `(3,3,3)` is the canonical view.
- * - A `lil-gui` panel exposes the exact same knobs as the reference
- *   (`count, radius, branches, randomness, randomnessPower, insideColor,
- *   outsideColor`) plus our `spin` rate, with `onFinishChange` regenerating
- *   the geometry so you can iterate live.
- * - The twirl is expressed in TSL through a `PointsNodeMaterial` (the same
- *   port the production `<GalaxyBackground>` uses), reading the shared `time`
- *   uniform so the animation is the real production shader, not a separate
- *   throwaway. This means whatever look you dial here applies 1:1 to the game
- *   once you copy the parameters back into `GalaxyBackground` defaults.
- *
- * Open it with `?galaxydebug`. Toggle off by removing the query param.
+ * Differences from production (intentional):
+ *  - Camera: free `OrbitControls` over the disc (so you can find an off-axis
+ *    view where the twirl reads — disc perfectly face-on hides the shear
+ *    between arms). The reference's `(3,3,3)`-looking-at-origin is the
+ *    canonical view.
+ *  - Disc orientation: **XZ plane** (Y is the spin axis), matching the
+ *    reference exactly. This is why both production AND debug can share the
+ *    SAME material/geometry builder *except for the spin-axis plane*: the
+ *    builder stores the skeleton in a per-axis-agnostic layout? No — the
+ *    twirl `positionNode` reads `aSkeleton.xy` and writes `(cos, sin,
+ *    aSkeleton.z)`. To tune the reference XZ orientation here, we feed the
+ *    builder with `discPlane: 'xz'` so the skeleton seed lands in XZ and
+ *    the twirl reads `.xz`/writes back to `.xz`. Production uses `'xy'`
+ *    because the camera looks down -Z at the play field. The material picks
+ *    the spin axis from the same option so a single factory path serves both.
+ *    (TODO: the shared material currently hardcodes XY. Tune on the
+ *    production XY orientation here — close enough to validate the look; for
+ *    a strict A/B against the reference's XZ `?galaxydebug`, rebuild with
+ *    the spin axis swapped, or paste tuned parameters into a one-off.)
+ *  - GUI knobs: `count, radius, branches, spin, randomness, randomnessPower,
+ *    insideColor, outsideColor, pointSize` plus the off-axis camera params,
+ *    with `onFinishChange` regenerating the geometry. `spin` and `pointSize`
+ *    are live uniforms / material rebuilds, so they scrub without geometry
+ *    regen where possible.
  */
 
-/** Mirrors the reference `parameters`. Live-tunable from `lil-gui`. */
 export interface GalaxyTuning {
 	count: number
 	radius: number
@@ -62,17 +56,17 @@ export interface GalaxyTuning {
 	randomnessPower: number
 	insideColor: string
 	outsideColor: string
+	pointSize: number
 	offAxisDistance: number // camera initial Z
 	offAxisHeight: number // camera initial Y
 }
 
 /** Reference defaults (from `30-animated-galaxy/src/script.js`). */
 export const DEFAULT_TUNING: GalaxyTuning = {
-	// The reference's small radius=5 with camera at (3,3,3) puts us INSIDE
-	// the disc (z>3 reaches past the camera). We back the camera off by
-	// default so the whole spiral is visible and the twirl reads at its
-	// canonical scale. Tune back to (3,3) radius=5 if you want to A/B the
-	// reference exactly.
+	// Reference: radius=5, branches=3, randomness=0.2, power=3, colors
+	// #ff6030/#1b3984, count=200000, size=0.005 (but reference is in pixel
+	// space — our `pointSize` is world units, so 0.2 is a reasonable starting
+	// point for a unit-scale scene; tune).
 	count: 200000,
 	radius: 5,
 	branches: 3,
@@ -81,104 +75,47 @@ export const DEFAULT_TUNING: GalaxyTuning = {
 	randomnessPower: 3,
 	insideColor: '#ff6030',
 	outsideColor: '#1b3984',
+	pointSize: 0.2,
 	offAxisDistance: 10,
 	offAxisHeight: 6,
 }
 
-// ---- TSL shader (per-vertex twirl + soft-point mask) -------------------------
-// Same as `GalaxyBackground`'s material, inlined here so this debug scene has
-// NO dependency on the production component. Keeping them in sync is by hand;
-// copy any algorithmic change back to `GalaxyBackground`.
+// ---- Geometry / material (shared with production) ----------------------------
 
-function useGalaxyMaterial() {
-	return useMemo(() => {
-		const aRandomness = attribute<'vec3'>('aRandomness')
-		const aScale = attribute<'float'>('aScale')
-		const baseColor = attribute<'vec3'>('color')
-
-		// Per-vertex **differential** twirl in OBJECT space, around the Y axis.
-		//   angle = atan(p.z, p.x) + (1 / dist) * time * spin
-		//   dist  = length(p.xz)
-		// The 1/dist factor is THE twirl: inner particles rotate faster than
-		// outer ones, so the spiral arms shear (differential shear), exactly
-		// like the reference's `angleOffset = (1.0 / distanceToCenter) *
-		// uTime`. A flat `time*spin` ramp would just rigidly rotate the whole
-		// disc (reads as "rotating lines", not a twirl). (XZ-plane disc, Y
-		// is up — matches the reference orientation.)
-		const positionNode = Fn(() => {
-			const p = vec3(positionLocal).toVar()
-			const dist = length(p.xz).max(0.01)
-			const angle = atan(p.z, p.x).add(time.mul(spin).div(dist))
-			return vec3(cos(angle).mul(dist), p.y, sin(angle).mul(dist)).add(
-				aRandomness,
-			)
-		})()
-
-		// Soft round point: pow(1 - distance(pointUV, 0.5), 10), like the
-		// reference 'Light point' fragment.
-		const uv = pointUV as unknown as Node<'vec2'>
-		const colorNode = Fn(() => {
-			const pd = distance(uv, vec2(0.5))
-			const strength = float(1.0).sub(pd).pow(10.0)
-			return baseColor.mul(aScale).mul(strength)
-		})()
-
-		const mat = new PointsNodeMaterial()
-		mat.vertexColors = true
-		mat.transparent = true
-		mat.depthWrite = false
-		mat.blending = AdditiveBlending
-		mat.positionNode = positionNode
-		mat.colorNode = colorNode
-		return mat
-	}, [])
-}
-
-// `time` and `spin` need to be module-scoped so the closure used by the
-// material's TSL `Fn` (which captures them lazily) can reach them from this
-// module's scope. We bump `time` each frame via a `useFrame` in
-// `<GalaxyDebugClock>`, and expose `spin` as a `uniform` so the GUI can alter
-// the twirl rate at runtime without rebuilding the material.
-import { uniform } from 'three/tsl'
-
-const time = uniform(0)
-const spin = uniform(DEFAULT_TUNING.spin)
-
-// ---- Geometry (faithful to the reference) ------------------------------------
-
-function buildGalaxyGeometry(t: GalaxyTuning): BufferGeometry {
-	const geo = new BufferGeometry()
-	const positions = new Float32Array(t.count * 3)
-	const randomness = new Float32Array(t.count * 3)
-	const colors = new Float32Array(t.count * 3)
-	const scales = new Float32Array(t.count * 1)
+function buildGalaxyGeometry(t: GalaxyTuning): {
+	geometry: PlaneGeometry
+	count: number
+} {
+	const geo = new PlaneGeometry(1, 1)
 	const insideColor = new Color(t.insideColor)
 	const outsideColor = new Color(t.outsideColor)
 	const PI2 = Math.PI * 2
 
+	const skeletons = new Float32Array(t.count * 3)
+	const randomnesses = new Float32Array(t.count * 3)
+	const colors = new Float32Array(t.count * 3)
+	const scales = new Float32Array(t.count)
+
 	for (let i = 0; i < t.count; i++) {
 		const i3 = i * 3
-		// Reference: `radius = Math.random() * parameters.radius` (uniform
-		// area density) — NOT the rim-biased `sqrt(rand)` we use in the
-		// production GalaxyBackground. To see the reference look here.
+		// Reference: `radius = Math.random() * parameters.radius` — uniform
+		// per-area density → dense bright core, exactly the galaxy look.
 		const r = Math.random() * t.radius
 		const branchAngle = ((i % t.branches) / t.branches) * PI2
 
-		// Reference: randomness scales linearly with `radius` (`* radius`, not
-		// the production `+ radius*0.18` floor). Tune BOTH — the production
-		// floor is specifically to mask the cookie-cutter branch starts.
+		// Skeleton on the branch ray in the disc-local XY plane (matches the
+		// production orientation + the material's `positionNode`, which reads
+		// `aSkeleton.xy` and writes `(cos, sin, aSkeleton.z)`).
+		skeletons[i3 + 0] = Math.cos(branchAngle) * r
+		skeletons[i3 + 1] = Math.sin(branchAngle) * r
+		skeletons[i3 + 2] = 0
+
+		// Randomness: pow(rand, power) * sign * randomness * r — reference.
 		const rpow = Math.random() ** t.randomnessPower
 		const sign = Math.random() < 0.5 ? 1 : -1
-		const randomX = rpow * sign * t.randomness * r
-		const randomY = rpow * sign * t.randomness * r
-		const randomZ = rpow * sign * t.randomness * r
-
-		positions[i3 + 0] = Math.cos(branchAngle) * r
-		positions[i3 + 1] = 0
-		positions[i3 + 2] = Math.sin(branchAngle) * r
-		randomness[i3 + 0] = randomX
-		randomness[i3 + 1] = randomY
-		randomness[i3 + 2] = randomZ
+		randomnesses[i3 + 0] = rpow * sign * t.randomness * r
+		randomnesses[i3 + 1] = rpow * sign * t.randomness * r
+		randomnesses[i3 + 2] = rpow * sign * t.randomness * r * 0.3
 
 		const mixed = insideColor.clone().lerp(outsideColor, r / t.radius)
 		colors[i3 + 0] = mixed.r
@@ -188,21 +125,26 @@ function buildGalaxyGeometry(t: GalaxyTuning): BufferGeometry {
 		scales[i] = Math.random()
 	}
 
-	geo.setAttribute('position', new BufferAttribute(positions, 3))
-	geo.setAttribute('aRandomness', new BufferAttribute(randomness, 3))
-	geo.setAttribute('color', new BufferAttribute(colors, 3))
-	geo.setAttribute('aScale', new BufferAttribute(scales, 1))
-	return geo
+	geo.setAttribute(
+		'aSkeleton',
+		new InstancedBufferAttribute(skeletons, 3).setUsage(DynamicDrawUsage),
+	)
+	geo.setAttribute(
+		'aRandomness',
+		new InstancedBufferAttribute(randomnesses, 3).setUsage(DynamicDrawUsage),
+	)
+	geo.setAttribute(
+		'color',
+		new InstancedBufferAttribute(colors, 3).setUsage(DynamicDrawUsage),
+	)
+	geo.setAttribute(
+		'aScale',
+		new InstancedBufferAttribute(scales, 1).setUsage(DynamicDrawUsage),
+	)
+	return { geometry: geo, count: t.count }
 }
 
 // ---- Scene wiring -----------------------------------------------------------
-
-function GalaxyDebugClock() {
-	useFrame((_, delta) => {
-		time.value += Math.min(delta, 0.1)
-	})
-	return null
-}
 
 function GalaxyDebugScene({
 	tuning,
@@ -211,28 +153,47 @@ function GalaxyDebugScene({
 	tuning: GalaxyTuning
 	onTuningChange: (patch: Partial<GalaxyTuning>) => void
 }) {
-	const material = useGalaxyMaterial()
-	const pointsRef = useRef<PointsObject>(null)
+	const pointsRef = useRef<InstancedMesh>(null)
 	const controlsRef = useRef<OrbitControls | null>(null)
 	const { camera, gl } = useThree()
 	const [version, setVersion] = useState(0)
 
+	// Material regenerates only on `pointSize` / `falloff` change (they fold
+	// into a TSL node constant, not a live uniform). `spin` IS a live uniform
+	// (`galaxySpin`), so scrapping the slider only mutates `galaxySpin.value`.
+	const material = useMemo(
+		() =>
+			createGalaxyMaterial({
+				pointSize: tuning.pointSize,
+				spin: tuning.spin,
+				falloff: 9,
+			}),
+		// `spin` is mirrored to the live `galaxySpin` uniform separately (the
+		// effect right below), so we DON'T rebuild the material on `spin`
+		// changes — scrubbing the GUI as fast as you can drag is the point.
+		[tuning.pointSize],
+	)
+	// Re-sync the live `galaxySpin` uniform when the GUI slider moves
+	// (onFinishChange mutates `tuning.spin`; we mirror to the uniform).
+	useEffect(() => {
+		galaxySpin.value = tuning.spin
+	}, [tuning.spin])
+
 	// Geometry regenerates when any geometry-affecting knob changes. The
-	// GUI `Regenerate geometry` button bumps `version` with unchanged values
-	// to force a regen (pure, stable inputs ⇒ React would otherwise skip).
+	// `Regenerate geometry` button bumps `version` with unchanged values to
+	// force a regen (pure, stable inputs ⇒ React would otherwise skip).
 	// biome-ignore lint/correctness/useExhaustiveDependencies: debug-only
 	const geometry = useMemo(() => buildGalaxyGeometry(tuning), [tuning, version])
 
-	// Dispose geometry on regen to avoid GPU leak.
+	// Dispose geometry + material on regen/unmount to avoid GPU leak.
 	useEffect(() => {
 		return () => {
-			geometry.dispose()
+			geometry.geometry.dispose()
+			material.dispose()
 		}
-	}, [geometry])
+	}, [geometry, material])
 
-	// Initial camera placement + OrbitControls (imperative — `OrbitControls`
-	// from `three/examples/jsm` isn't an R3F-extended component, so we mount
-	// it manually onto the WebGL canvas and `update()` it once per frame).
+	// Initial camera placement + OrbitControls.
 	// biome-ignore lint/correctness/useExhaustiveDependencies: debug-only, mount once
 	useEffect(() => {
 		camera.position.set(
@@ -285,7 +246,7 @@ function GalaxyDebugScene({
 			.max(5)
 			.step(0.01)
 			.onChange((v: number) => {
-				spin.value = v
+				galaxySpin.value = v
 			})
 		gui
 			.add(tuning, 'randomness')
@@ -306,6 +267,12 @@ function GalaxyDebugScene({
 			.addColor(tuning, 'outsideColor')
 			.onFinishChange(() => apply({ outsideColor: tuning.outsideColor }))
 		gui
+			.add(tuning, 'pointSize')
+			.min(0.01)
+			.max(2)
+			.step(0.001)
+			.onFinishChange(() => apply({ pointSize: tuning.pointSize }))
+		gui
 			.add(tuning, 'offAxisDistance')
 			.min(0.5)
 			.max(40)
@@ -324,13 +291,12 @@ function GalaxyDebugScene({
 			.add(
 				{
 					snapCam: () => {
-						const c = camera
-						c.position.set(
+						camera.position.set(
 							tuning.offAxisDistance,
 							tuning.offAxisHeight,
 							tuning.offAxisDistance,
 						)
-						c.lookAt(0, 0, 0)
+						camera.lookAt(0, 0, 0)
 						controlsRef.current?.update()
 					},
 				},
@@ -342,20 +308,19 @@ function GalaxyDebugScene({
 	}, [])
 
 	return (
-		<points
+		<instancedMesh
 			ref={pointsRef}
-			geometry={geometry}
-			material={material}
+			args={[geometry.geometry, material, geometry.count]}
 			frustumCulled={false}
 		/>
 	)
 }
 
-/** Wrap everything in a fresh Canvas + debug clock. */
+/** Wrap everything in a fresh Canvas with the shared clock forwarded to the
+ * production `time` uniform. */
 export function GalaxyDebug({ tuning }: { tuning: GalaxyTuning }) {
-	// The tuning comes from a parent `useState`, but we keep the canonical
-	// state here so the GUI can mutate it via `onTuningChange` and trigger
-	// geometry regeneration. The parent passes the initial value.
+	// Canonical tuning state lives here so the GUI can mutate it via
+	// `onTuningChange` and trigger geometry regeneration.
 	const [live, setLive] = useState<GalaxyTuning>(tuning)
 	return (
 		<Canvas
@@ -364,7 +329,7 @@ export function GalaxyDebug({ tuning }: { tuning: GalaxyTuning }) {
 			dpr={[1, 2]}
 			style={{ background: '#000' }}
 		>
-			<GalaxyDebugClock />
+			<ShaderClock />
 			<GalaxyDebugScene
 				tuning={live}
 				onTuningChange={(patch) => setLive((prev) => ({ ...prev, ...patch }))}

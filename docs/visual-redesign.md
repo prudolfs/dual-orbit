@@ -422,6 +422,24 @@ now; Step 6 no longer needs to revisit this.
 
 ### Step 4 — Galaxy background points ✅
 
+> **Current architecture (iteration 8, see Step 7):** `<instancedMesh>` of a
+> `PlaneGeometry(1,1)` quad template (one per star), driven by a TSL
+> `MeshBasicNodeMaterial` exported from `src/three/materials/galaxy.ts`
+> (`createGalaxyMaterial`). Per-instance data (`aSkeleton`, `aRandomness`,
+> `color`, `aScale`) rides on `InstancedBufferAttribute`s on the quad
+> template. The twirl is computed PER-INSTANCE in the material's
+> `positionNode` — the reference's `1/r` differential shear, in TSL,
+> reading the shared `time` uniform. Soft-point falloff is a `colorNode`
+> `pow(1-d,10)` mask. AdditiveBlending + `depthWrite:false`.
+>
+> This replaces EVERY earlier implementation (stock `PointsMaterial` +
+> `onBeforeCompile`, and `PointsNodeMaterial`) because the WebGL-fallback
+> backend of `WebGPURenderer` hardcodes `gl_PointSize = 1.0` at the tail of
+> the generated vertex shader (`GLSLNodeBuilder._getGLSLVertexCode`), so no
+> raw `Points` approach can ever produce visible-sized bright stars under
+> our renderer. The narrative below is preserved for history but reflects
+> the pre-iteration-8 (stock `PointsMaterial`) design.
+
 > **Update — twirl fix (iteration 5, see Step 7):** the implementation below
 > originally baked `aRandomness` into `position`, clamped the per-vertex min
 > distance, ran the per-vertex shear at `0.18×` and compensated with a
@@ -666,6 +684,15 @@ energy scene. The HUD is DOM, so this is pure CSS — no scene changes. Goals:
 
   ## Still suboptimal: 1px-point limitation + visual tuning harness
 
+  > **Superseded by iteration 8 (above):** the 1px limitation is solved
+  > by switching from `<points>` to `<instancedMesh>` of billboarded
+  > quads. The tuning-harness (`?galaxydebug`) below is STILL the place to
+  > dial the look — it now uses the SAME `<instancedMesh>` +
+  > `createGalaxyMaterial` factory as production (no more inline
+  > `PointsNodeMaterial`), and adds a `pointSize` knob that was missing
+  > before (the critical parameter for visible stars). The narrative below
+  > is preserved for history.
+
   The remaining complaint ("looks like white noise, only blue, no twirl")
   is a consequence of the 1px-point hardcode (`WebGPURenderer`'s
   WebGL-fallback forces `gl_PointSize = 1.0` regardless of `sizeNode`). The
@@ -685,10 +712,12 @@ energy scene. The HUD is DOM, so this is pure CSS — no scene changes. Goals:
     outsideColor`) plus our `spin` and the camera's `offAxis*` params, with
     `onFinishChange` regenerating the geometry. `spin` is a live uniform so
     you can scrub it without rebuild.
-  - Same TSL `PointsNodeMaterial` and `time` shared uniform the production
-    `GalaxyBackground` uses (no onBeforeCompile, runs on the node builder
-    under `WebGPURenderer`), so whatever look you dial here applies 1:1 to
-    the game once you copy the parameters into `GalaxyBackground` defaults.
+  - Same `createGalaxyMaterial` factory (now `<instancedMesh>` of
+    billboarded quads, not `PointsNodeMaterial`) and `time` shared uniform
+    the production `GalaxyBackground` uses — whatever look you dial here
+    applies 1:1 to the game once you copy the parameters into
+    `GalaxyBackground` defaults. Added a `pointSize` knob (the parameter
+    that makes visible stars actually visible).
   - Route wired into `src/App.tsx` (`?galaxydebug` switches to a debug
     `<Canvas>` with `<RenderLoop />`); the regular game path is untouched.
 
@@ -696,6 +725,72 @@ energy scene. The HUD is DOM, so this is pure CSS — no scene changes. Goals:
   visible-sized bright points so the twirl reads at the production
   billboarded scale. Or alternatively, render the galaxy through a legacy
   `WebGLRenderer` to recover `gl_PointSize = size * (1/-z)` attenuation.
+
+- **Galaxy twirl — iteration 8 (visible-sized stars via `<instancedMesh>` of
+  billboarded quads).** Iteration 7 made the TSL twirl actually *run* under
+  `WebGPURenderer`, but the `PointsNodeMaterial` `sizeNode` is silently
+  ignored — the WebGL-fallback backend hardcodes `gl_PointSize = 1.0` at the
+  tail of the generated vertex shader (`GLSLNodeBuilder._getGLSLVertexCode`),
+  so every "star" renders at exactly 1 pixel. With `count=350k` and
+  `AdditiveBlending` that read as a flat, dim, white-noise-ish haze — the
+  blame screenshot-013 "gets in shape" version — and the twirl does NOT read
+  at the production billboarded scale because individual arms are sub-pixel.
+  The reference (`screenshot-014`, journey 30) shows bright, clearly-visible
+  star particles distributed around a dense core with a readable spiral
+  twirl; 1px Points fundamentally cannot reproduce that look.
+
+  Fix — port the documented escape hatch (`PointsNodeMaterial` doc itself
+  recommends `Sprite` + instancing for visible-sized points): replace
+  `<points>` with `<instancedMesh>` of a `PlaneGeometry(1,1)` quad, one
+  per star. The twirl is computed PER-INSTANCE in the `positionNode` of a
+  TSL `MeshBasicNodeMaterial`, so the per-vertex **differential** `1/r`
+  shear is still honoured by the node builder and animates in lockstep with
+  the shared `time` uniform — but each star now has a real world-space
+  size (the quad corner is scaled by `pointSize * aScale` in the
+  `positionNode`), so 200k instances read as bright solid stars like the
+  reference (not 1px sprinkles).
+
+  Geometry defaults RESTORED to the journey-30 reference values where they
+  produce the look — the iter-6 anti-pie-slice workarounds (rim-biased
+  `sqrt(rand)` radius, absolute `+radius*0.18` fuzz floor, 45% random halo,
+  `branches=8`) were diluting the spiral structure that reads as a galaxy.
+  With visible stars the bare branch skeleton IS the galaxy, so we go back
+  to the reference's `rand*radius`, `randomness*radius`, `branches=5`,
+  `randomnessPower=3`, random-only at the reference ratio. Twirl rate stays
+  at the reference's `1/r` (no clamp, no `0.18×` slowdown), randomness stays
+  a separate post-rotation `aRandomness` attribute. The disc lies in XY
+  (Z normal toward camera) instead of the reference's XZ because the
+  camera looks down -Z at the play field — the whole `<instancedMesh>` is
+  billboarded to the camera anyway, so the XY disc always faces the view.
+
+  Per-instance data (`aSkeleton`, `aRandomness`, `color`, `aScale`) rides
+  on `InstancedBufferAttribute`s attached to the shared quad template;
+  `attribute(name)` inside the instanced mesh's node system auto-indexes
+  those by `instanceIndex`. Because the quad template is in XY and the
+  root is billboarded to the camera, we do NOT need a per-instance
+  camera-facing rotation in the shader — the quad already faces the view.
+
+  Extracted the material + live `galaxySpin` uniform into
+  `src/three/materials/galaxy.ts` (`createGalaxyMaterial({pointSize, spin,
+  falloff})`) so the production `<GalaxyBackground>` and the `?galaxydebug`
+  tuning scene use the SAME factory (tuning dialled there applies 1:1 to
+  the game). `?galaxydebug` also now uses `<instancedMesh>` + the shared
+  factory and exposes a `pointSize` knob (was missing before — that's the
+  parameter that lets visible stars actually be visible).
+
+  **Verification (Playwright 1280×720, frame-a vs frame-b 1.5 s apart):**
+  shader compiles with **zero** WebGL console errors (InstancedMesh +
+  MeshBasicNodeMaterial are fully node-builder-supported, unlike
+  `onBeforeCompile`). **59,091** bright pixels (lum>40), distributed
+  exactly like the reference — densest + brightest at the core (band
+  r∈[0, 0.17]: 2,812 px, avgLum 71), even mid-disc (bands r∈[0.17, 0.83]:
+  7.8k–10.6k px each, avgLum 53–57). Between frames 1.5 s apart,
+  **419,356** pixels change across every annulus (band 1: 26k, band 2:
+  47k, band 3: 53k, band 4: 54k) — the differential twirl now rotates
+  stars all the way out to the visible frame edges (the iter-7 1px
+  version only moved the inner 200×200 px per the doc). Output is on disk
+  as `.temp/screenshot-015.png` (frame-a) and `.temp/screenshot-016.png`
+  (frame-b).
 
 - **Galaxy twirl + scroll-twitch fix (iteration 4, screenshot-009 — superseded
   above):** the galaxy was showing as a static, non-animating image and visibly
