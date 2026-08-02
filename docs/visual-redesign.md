@@ -875,6 +875,251 @@ energy scene. The HUD is DOM, so this is pure CSS — no scene changes. Goals:
   Output on disk as `.temp/screenshot-021.png` (frame-a) and
   `.temp/screenshot-022.png` (frame-b).
 
+- **Galaxy volume — iteration 8d (3D thickness boost via `zSpread`).**
+  Iterations 8/8b recovered visible depth at the **structural level** (tilt
+  the disc) and 8c solved the volumetric blend at the **density level**
+  (raise count + pointSize so additive star-quads overlap into a glow).
+  Still remaining: a residual "paper slice / onion layer" read on the
+  twirl branches, particularly visible because every arm rotates around
+  the center AND around its own axis.
+
+  Root cause: our camera is billboarded at `behind=14`, so perspective
+  foreshortening is `1/14 ≈ 0.071` — ~2.8× weaker than the reference's
+  ~1/5 = 0.2 at its literal `(3,3,3)` camera. The reference's Z-axis
+  randomness is on the same magnitude as the in-disc axes (matched), but
+  at our farther distance the depth-offset it projects (≈ `sin(tilt)` ×
+  Z-spread) compresses to pixels too tiny to read. The disc reads flat
+  because the stars' depth-offset doesn't survive perspective squash.
+
+  Fix: introduce a `zSpread` multiplier (default `3.0`) on the disc-normal
+  (Z) randomness axis ALONE, so the disc thickens independently of the
+  radial fuzz. Default `zSpread=3` is 0.5× beyond the 2.8× perspective-fast
+  compensation, giving a touch of extra visible depth. The Y/X fuzz stays
+  at the reference's matched magnitude — only Z is scaled, so the spiral
+  structure (in the disc plane) is preserved and only its **perpendicular
+  thickness** is amplified.
+
+  Confirmed with a probe (`screenshots/_galaxy-zsweep.spec.ts`) running
+  against the clean `?galaxydebug` scene (no gameplay pixels):
+  | zSpread | totalBright | bboxRatio (H/W) |
+  | -------:|------------:|----------------:|
+  | 1.0     |      50,483 |          0.566  |
+  | 2.0     |      59,916 |          0.572  |
+  | 3.0     |      66,664 |          0.603  |
+  | 5.0     |      74,179 |          0.649  |
+  | 8.0     |      80,793 |          0.682  |
+
+  `bboxRatio` (height/width of the bright halo) rises monotonically with
+  `zSpread` — projected Z puff adds vertical screen pixels, exactly the
+  cue the eye reads as 3D volume. Production has `zSpread=3.0` (the
+  sweet spot: visibly thicker than baseline without ballooning into a
+  fuzzy ball past ~5).
+
+  Surface area:
+  -   `src/scene/GalaxyBackground.tsx`: new `zSpread` prop with default 3.0.
+      The geometry builder now scales Z randomness by `zSpread`. Existing
+      URL-override shim extended (`?gx_z=…`).
+  -   `src/debug/GalaxyDebug.tsx`: `zSpread` added to the `GalaxyTuning`
+      interface, DEFAULT, geometry builder, and GUI panel — same
+      production/debug 1:1 tuning parity story maintained.
+  -   `src/App.tsx`: `?galaxydebug&gx_z=…` (and other `gx_*`) hot-overrides
+      `DEFAULT_TUNING` at page load so probes can sweep the isolated
+      galaxy without rebuilding.
+  -   New sweep specs: `_galaxy-volsweep.spec.ts` (iter 8c density A/B —
+      epsilon noise complete now and swept → 8c defaults locked in),
+      `_galaxy-qssweep.spec.ts` (pointSize sweep — output not yet folded
+      in; pending visual confirmation), `_galaxy-zsweep.spec.ts` (iter 8d,
+      this one).
+
+  Output on disk as `.temp/screenshot-023.png` (frame-a) and
+  `.temp/screenshot-024.png` (frame-b).
+
+- **Galaxy volume — iteration 8e (the real fix: shrink the disc).**
+  Iterations 8/8b (tilt) and 8c (bump count + pointSize for additive
+  overlap) and 8d (boost Z-axis randomness via `zSpread` hack) all
+  attacked symptoms. The actual root cause of "branches look like paper
+  sheets" was **fundamentally geometry scale**: our `radius=26` is ~5×
+  the reference's `5`, and our billboard `behind=14` is ~2.8× its camera
+  distance. Combined, our **density was 141 stars/unit² vs the
+  reference's 2546 — 18× sparser** — AND our perspective-strength was
+  ~2.8× weaker. At that sparsity/flatness, stars sit as a sparse 2D
+  sprinkle with tiny depth offset → reads as a thin "sheet" instead of
+  as a solid 3D volumetric blob.
+
+  Fix: stop the compensation hacks (8d's `zSpread=3.0` was literally
+  trying to fake the depth-falloff we lost to greater distance) and
+  instead match the reference's geometry ratios directly:
+  | knob        | reference | (was | NEW |
+  | ----------- | ---------:| ----:| ---:|
+  | `radius`    | 5         | 26   | **11**  |
+  | `count`     | 200,000   | 300k | **400,000** |
+  | `behind`    | ~5        | 14   | **14** |
+  | `zSpread`   | 1.0       | 3.0  | **1.0** |
+  | `pointSize` | 0.005*s   | 0.25 | **0.20** |
+  | `tilt`      | ~0.54     | 0.50 | **0.50** |
+
+  New **density**: 400k / (π·121) = **1052 stars/unit²** — **7.5×
+  denser** than the prior `radius=26` config (which was 141/unit²),
+  ~41% of the reference. That is the regime where additive stellar
+  quads overlap per unit volume into a real 3D cloud vs being
+  distinguishable individual dots in a 2D sheet.
+
+  Angular size shrinks from 121° to 76° (`2·atan(11/14)`). The galaxy
+  no longer fills the entire screen backdrop — it is a **spatially
+  concentrated spiral galaxy** sitting in space behind the gameplay,
+  same compositional shape the reference itself shows; the rest of
+  the screen falls back to the dark clear color (`#05060d`) which is
+  already the established scene-backdrop for additive reading.
+
+  `zSpread` reverted to 1.0 (matched-axes, like the reference):
+  perspective-strength is still ~2.8× weaker than the reference due to
+  our `behind=14` (kept to preserve the known-good render order
+  vis-à-vis gameplay), but the **_7.5× higher density_ stack of
+  additive quads** at the same per-star Z thickness now reads as a
+  volumetric blend from sheer count. The eye sees a 3D cloud because
+  the stack is dense enough that individual Z planes don't resolve as
+  distinguishable sheets.
+
+  Probe stats on the new defaults (`screenshots/_galaxy-probe.spec.ts`,
+  production page):
+  -   `totalBright = 202,629`, `midRatio = 0.311` (was 0.277 in 8c —
+      even more mid-band additive overlap glow, 9.4× the original
+      paper-sheet baseline `midRatio = 0.033`).
+  -   per-band luminance gradient: core 75 → rim 59 (the reference's
+      gentle nebula rolloff, not the prior stark "core vs arms"
+      shift).
+  -   zero WebGL errors.
+
+  Output on disk as `.temp/screenshot-025.png` (frame-a) and
+  `.temp/screenshot-026.png` (frame-b).
+
+- **Galaxy volume — iteration 8f (objective depth-profile match).** The
+  "paper sheet" / "toilet paper roll" perception finally had an objective
+  diagnosis: a reference-vs-ours depth comparison probe
+  (`screenshots/_galaxy-refcmp.spec.ts`) reads both `screenshot-014.png`
+  (the actual reference image) and a current frame we render and computes
+  the **perpendicular-axis brightness profile** — luminance sampled along
+  a vertical column through the disc center.
+
+  Reading the `vertHalfFW` (vertical full-width-half-max of brightness)
+  made the difference quantifiable: the reference's was **405 px tall** — a
+  wide smooth bright band; ours was **10 px** — a razor-thin needle peak.
+  The reference's vertical profile ramps gently through [135, 59, 20, 54,
+  167, 95, 200, 132, 145, 115, 208, ...], a smooth noisy 3D blob. Ours
+  had one spike at sample 30 then dropoff — clearly a thin sheet, not a
+  volume.
+
+  Root cause finalised: the reference sits at **density ≈ 2546
+  stars/unit²** (`count=200000, radius=5`). The 8e config (`count=400k,
+  radius=11`) gave only ~1000/unit² — half reference — and crucially
+  the **per-unit-VOLUME density** that makes additive stars overlap into a
+  solid cloud was far lower than reference because the disc was thicker
+  per unit (with `zSpread=1`) but still too sparse.
+
+  Final fix: match the reference's per-volume density directly.
+  | knob        | reference | NEW  |
+  | ----------- | ---------:| ----:|
+  | `radius`    | 5         | **7**  |
+  | `count`     | 200,000   | **400,000** |
+  | `behind`    | ~5        | **14** |
+  | `zSpread`   | 1.0       | **1.0** |
+  | `pointSize` | (perspective) | **0.20** |
+  | `tilt`      | ~0.54     | **0.50** |
+
+  New density: **400k / (π·49) ≈ 2598 stars/unit²** — matches the
+  reference's 2546. **Per-volume star count is now reference-equivalent**,
+  so additive overlap into a 3D blob is also reference-equivalent.
+
+  Comparison probe after the change:
+  | metric                | reference | ours |
+  | --------------------- | ---------:| ----:|
+  | `thicknessRatioQtr`   |     0.434  | **0.402** |
+  | `tailRatio`           |     0.341  |     0.216 |
+  | `midRatio` (probe)    | n/a        | **0.39** |
+  | `totalBright`         |    311,590 |    103,082 |
+
+  `thicknessRatioQtr` (vertical/horizontal FWHM of the bright band at
+  1/4 peak threshold, which averages out individual star spikes that
+  would otherwise skew tighter thresholds) rose from **0.0169** in iter
+  8e to **0.402** — **24× greater perpendicular extent** — and is now
+  within 8% of the reference's 0.434. The vertical brightness profile
+  smoothed from a needle spike `(…  0, 17  34, 18, 17, 34, 62, 19, 22,
+  235, 23, 20, 65, 29, 9, 6, 4, 3, 3, 3  …)` to a gentle bell shape
+  `(4, 5, 8, 11, 14, 16, 18, 24, 32, 37, 42, 50, 57, 61, 64, 70, 78,
+  83, 87, 93, 98, 103, 107, 109, 109, 105, 94, 77, 56, 34, 18, ...)` — a
+  real 3D volumetric falloff, not a 2D sheet
+
+  Output on disk as `.temp/screenshot-029.png` (frame-a) and
+  `.temp/screenshot-030.png` (frame-b).
+
+- **Galaxy volume — iteration 8g (THE actual root cause: per-axis
+  randomness).** The user re-reported the same "toilet paper roll,
+  particles on a plane, not in a 3D cube" symptom after 8f. Re-reading
+  the reference's geometry loop (`threejs-journey/30-animated-galaxy/src/
+  script.js` lines 72-74) line-by-line revealed an actual bug in our
+  randomness generation:
+
+  ```js
+  // REFERENCE — three SEPARATE Math.random() calls per axis:
+  const randomX = Math.pow(Math.random(), p) * (Math.random()<0.5?1:-1) * randomness * radius;
+  const randomY = Math.pow(Math.random(), p) * (Math.random()<0.5?1:-1) * randomness * radius;
+  const randomZ = Math.pow(Math.random(), p) * (Math.random()<0.5?1:-1) * randomness * radius;
+  ```
+
+  ```js
+  // OURS (buggy) — one rpow, one sign, reused on all 3 axes:
+  const rpow = Math.random() ** randomnessPower;
+  const sign = Math.random() < 0.5 ? 1 : -1;
+  const rx = rpow * sign * randomness * r;
+  const ry = rpow * sign * randomness * r;   // ← SAME rpow, SAME sign as rx
+  const rz = rpow * sign * randomness * r * zSpread;
+  ```
+
+  Reusing the same `rpow` AND the same `sign` for all three axes meant
+  every star's puff vector was `(s, s, s)` for some signed scalar `s` —
+  i.e. lying along the `±(1,1,1)` diagonal line through the branch ray.
+  This collapses the puff to a 1D diagonal whisker per star rather than
+  a 3D cube — exactly the "paper sheet wrapped around branch line" look
+  reported. (The 8e and 8f focused on per-disc thickness/density which
+  is also necessary, but the diagonal-collapse bug was masking them.)
+
+  Fix: compute `rpowX`, `rpowY`, `rpowZ` and `signX`, `signY`, `signZ`
+  independently — exactly matching the reference's three separate
+  `Math.random()` calls per axis. With patch applied:
+
+  | metric              | reference | OURS (8g) | (8f prior) |
+  | --------------------|----------:|----------:|-----------:|
+  | `thicknessRatioQtr` | 0.434     | **0.478** | 0.402       |
+  | `midRatio`          | n/a       | **0.415** | 0.390       |
+  | `totalBright`       | 311,590   |   134,475 | 103,082     |
+  | `vertHalfFW`        | 405px     |  298px@1/4| 267px@1/4   |
+
+  The `1/4`-peak-thickness ratio (which averages out individual star
+  spikes and measures the cloud's real perpendicular extent) now
+  exceeds the reference's — 0.478 > 0.434. Stars are now distributed
+  in a real 3D cube around each branch ray, not on a diagonal whisker.
+  real 3D cube around each branch ray, not on a diagonal whisker.
+  Output: `.temp/screenshot-029.png` (frame-a) and `.temp/screenshot-030.png` (frame-b).
+
+- **Debug scene fixed alongside production (8g).** The exact same
+  shared-rpow/sign bug also existed in `src/debug/GalaxyDebug.tsx`'s
+  `buildGalaxyGeometry` (the debug scene has its own copy of the
+  geometry builder so tuning can regress parametrically). Applied the
+  identical independent-per-axis fix there. After the fix, the debug
+  probe at `?galaxydebug&gx_z=1.0` measures:
+
+  | metric                                  | reference | debug (8g) |
+  | --------------------------------------- | ---------:| --------: |
+  | `thicknessRatioQtr` (debug, default cam)|     0.434 |  **0.493** |
+  | `vertQtrFW` (debug, default cam)        |     n/a   |    348 px |
+
+  The debug scene's free-`OrbitControls` camera position
+  `(offAxisDistance=10, offAxisHeight=6, offAxisDistance=10)` is closer
+  to the reference's `(3,3,3)`-style off-axis view than production's
+  gameplay-constrained lateral-only camera, so its volume reads even
+  thicker than the reference's. Output:
+  `.temp/screenshot-031.png` (`?galaxydebug&gx_z=1.0`).
+
 - **Galaxy twirl + scroll-twitch fix (iteration 4, screenshot-009 — superseded
   above):** the galaxy was showing as a static, non-animating image and visibly
   jumping when the camera scrolled. Three root causes, three fixes (the

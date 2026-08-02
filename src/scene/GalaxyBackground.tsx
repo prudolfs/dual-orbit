@@ -113,16 +113,22 @@ const _viewDir = new Vector3()
 const _camQuat = new Quaternion()
 
 export function GalaxyBackground({
-	count = numParam('gx_count') ?? 300000,
-	radius = 26,
+	count = numParam('gx_count') ?? 400000,
+	radius = numParam('gx_radius') ?? 7,
 	branches = 5,
 	randomness = 0.2,
 	randomnessPower = 3,
+	// Z-axis (disc-normal) randomness multiplier. Reference uses
+	// matched-axes `randomness` (zSpread=1.0). Now production sits at
+	// reference-equivalent density (~2600 stars/unit² at `radius=7`),
+	// so per-volume additive overlap matches the reference without any
+	// compensation.
+	zSpread = numParam('gx_z') ?? 1.0,
 	insideColor = '#3a6fff',
 	outsideColor = '#0a1030',
-	pointSize = numParam('gx_ps') ?? 0.25,
+	pointSize = numParam('gx_ps') ?? 0.2,
 	tilt = 0.5,
-	behind = 14,
+	behind = numParam('gx_behind') ?? 14,
 }: {
 	count?: number
 	radius?: number
@@ -137,6 +143,10 @@ export function GalaxyBackground({
 	 * camera billboard. `0` is dead face-on (flat); ~0.5 rad ≈ 28.6° shows
 	 * the disc at the reference's `(3,3,3)`-camera angle (visible depth). */
 	tilt?: number
+	/** Multiplier on the Z-axis (disc-normal) randomness, to thicken the
+	 * disc independently of the radial `randomness` and recover visible
+	 * 3D volume at greater camera distance. Reference is 1.0 (matched axes). */
+	zSpread?: number
 	behind?: number
 }) {
 	const root = useRef<InstancedMesh>(null)
@@ -182,19 +192,25 @@ export function GalaxyBackground({
 			skeletons[i3 + 1] = Math.sin(branchAngle) * r
 			skeletons[i3 + 2] = 0
 
-			// Randomness halo — identical to the reference: pow(rand, power)*
-			// sign * randomness * radius. KEPT as a separate attribute added
-			// AFTER the in-shader twirl (the reference does exactly this).
-			const rpow = Math.random() ** randomnessPower
-			const sign = Math.random() < 0.5 ? 1 : -1
-			const rx = rpow * sign * randomness * r
-			const ry = rpow * sign * randomness * r
-			// Z thickness matches the reference's XY-magnitude on all 3 axes
-			// (the reference assigns the same fuzzy radius to X, Y, AND Z).
-			// With the disc now tilted to the camera (see `tilt` prop), this
-			// real 3D volume reads as visible depth instead of being
-			// compressed away by a face-on view.
-			const rz = rpow * sign * randomness * r
+			// Randomness halo — identical to the reference: pow(rand, power)
+			// * sign * randomness * radius, computed INDEPENDENTLY per axis.
+			// The reference calls `Math.random()` three times per star (once
+			// each for X, Y, Z) so each axis has its own magnitude AND its own
+			// sign — this is what distributes stars in a CUBE around the
+			// branch ray, not on a diagonal line through it. Reusing a single
+			// `rpow`+`sign` for all 3 axes (our previous bug) collapsed every
+			// star's puff onto the `±(1,1,1)` diagonal — a 1D line of stars
+			// per branch → the "toilet paper roll / paper sheet" look,
+			// exactly the symptom reported.
+			const rpowX = Math.random() ** randomnessPower
+			const rpowY = Math.random() ** randomnessPower
+			const rpowZ = Math.random() ** randomnessPower
+			const signX = Math.random() < 0.5 ? 1 : -1
+			const signY = Math.random() < 0.5 ? 1 : -1
+			const signZ = Math.random() < 0.5 ? 1 : -1
+			const rx = rpowX * signX * randomness * r
+			const ry = rpowY * signY * randomness * r
+			const rz = rpowZ * signZ * randomness * r * zSpread
 			randomnesses[i3 + 0] = rx
 			randomnesses[i3 + 1] = ry
 			randomnesses[i3 + 2] = rz
@@ -240,6 +256,7 @@ export function GalaxyBackground({
 		insideColor,
 		outsideColor,
 		pointSize,
+		zSpread,
 	])
 
 	// Per-frame: lock the galaxy to the camera as a true backdrop

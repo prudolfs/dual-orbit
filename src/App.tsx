@@ -1,6 +1,10 @@
 import { Canvas, useFrame } from '@react-three/fiber'
 import { useEffect, useRef, useState } from 'react'
-import { DEFAULT_TUNING, GalaxyDebug } from './debug/GalaxyDebug'
+import {
+	DEFAULT_TUNING,
+	GalaxyDebug,
+	type GalaxyTuning,
+} from './debug/GalaxyDebug'
 import { driveFrame, installBotIfDev } from './game/bot/installer'
 import {
 	advanceFixedSimulation,
@@ -19,6 +23,20 @@ function App() {
 			: false
 
 	if (galaxyDebug) {
+		const sp =
+			typeof window !== 'undefined'
+				? new URLSearchParams(window.location.search)
+				: null
+		const num = (k: string, d: number) => {
+			const v = sp?.get(k)
+			return v === null ? d : Number(v)
+		}
+		const tuning: GalaxyTuning = { ...DEFAULT_TUNING }
+		tuning.zSpread = num('gx_z', DEFAULT_TUNING.zSpread)
+		tuning.tilt = num('gx_tilt', DEFAULT_TUNING.tilt)
+		tuning.pointSize = num('gx_ps', DEFAULT_TUNING.pointSize)
+		tuning.count = num('gx_count', DEFAULT_TUNING.count)
+		tuning.radius = num('gx_radius', DEFAULT_TUNING.radius)
 		return (
 			<main className="game-shell" style={{ padding: 0 }}>
 				<section
@@ -26,7 +44,7 @@ function App() {
 					aria-label="Galaxy tuning debug"
 					style={{ position: 'relative' }}
 				>
-					<GalaxyDebug tuning={DEFAULT_TUNING} />
+					<GalaxyDebug tuning={tuning} />
 				</section>
 			</main>
 		)

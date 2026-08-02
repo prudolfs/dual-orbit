@@ -57,6 +57,7 @@ export interface GalaxyTuning {
 	insideColor: string
 	outsideColor: string
 	pointSize: number
+	zSpread: number // multiplier on Z-axis (disc-normal) randomness
 	tilt: number // disc tilt on top of camera billboard (rad)
 	offAxisDistance: number // camera initial Z
 	offAxisHeight: number // camera initial Y
@@ -77,6 +78,7 @@ export const DEFAULT_TUNING: GalaxyTuning = {
 	insideColor: '#ff6030',
 	outsideColor: '#1b3984',
 	pointSize: 0.2,
+	zSpread: 1.0,
 	tilt: 0.5,
 	offAxisDistance: 10,
 	offAxisHeight: 6,
@@ -112,14 +114,24 @@ function buildGalaxyGeometry(t: GalaxyTuning): {
 		skeletons[i3 + 1] = Math.sin(branchAngle) * r
 		skeletons[i3 + 2] = 0
 
-		// Randomness: pow(rand, power) * sign * randomness * r — reference.
-		const rpow = Math.random() ** t.randomnessPower
-		const sign = Math.random() < 0.5 ? 1 : -1
-		randomnesses[i3 + 0] = rpow * sign * t.randomness * r
-		randomnesses[i3 + 1] = rpow * sign * t.randomness * r
-		// Full Z thickness (matches production + reference): the disc is
-		// tilted to the camera, so this reads as visible depth.
-		randomnesses[i3 + 2] = rpow * sign * t.randomness * r
+		// Randomness: pow(rand, power) * sign * randomness * r — INDEPENDENT
+		// per axis (matches the reference's three separate Math.random()
+		// calls per axis). A single shared rpow+sign across all 3 axes
+		// would collapse every star's puff onto the `±(1,1,1)` diagonal —
+		// a 1D whisker per branch → the "paper sheet" look we just
+		// diagnosed in production. Each axis needs its own magnitude and
+		// sign so stars distribute in a real 3D cube around the branch ray.
+		const rpowX = Math.random() ** t.randomnessPower
+		const rpowY = Math.random() ** t.randomnessPower
+		const rpowZ = Math.random() ** t.randomnessPower
+		const signX = Math.random() < 0.5 ? 1 : -1
+		const signY = Math.random() < 0.5 ? 1 : -1
+		const signZ = Math.random() < 0.5 ? 1 : -1
+		randomnesses[i3 + 0] = rpowX * signX * t.randomness * r
+		randomnesses[i3 + 1] = rpowY * signY * t.randomness * r
+		// Z thickness scaled by `zSpread` (production default 1.0 now
+		// matches the reference's matched-axes randomness).
+		randomnesses[i3 + 2] = rpowZ * signZ * t.randomness * r * t.zSpread
 
 		const mixed = insideColor.clone().lerp(outsideColor, r / t.radius)
 		colors[i3 + 0] = mixed.r
@@ -280,6 +292,12 @@ function GalaxyDebugScene({
 			.max(2)
 			.step(0.001)
 			.onFinishChange(() => apply({ pointSize: tuning.pointSize }))
+		gui
+			.add(tuning, 'zSpread')
+			.min(0)
+			.max(10)
+			.step(0.05)
+			.onFinishChange(() => apply({ zSpread: tuning.zSpread }))
 		gui
 			.add(tuning, 'tilt')
 			.min(0)
