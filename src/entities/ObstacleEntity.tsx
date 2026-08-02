@@ -11,15 +11,12 @@ type ObstacleEntityProps = {
 /**
  * Holographic obstacle (see docs/visual-redesign.md Step 3).
  *
- * Each obstacle is a `boxGeometry` rendered with the shared holographic node
- * material from Step 1. Per-kind color + per-kind glitch strength telegraphs
- * danger: `static` boxes sit quiet, `moving`/colliding ones jitter harder to
- * read as "energy".
- *
- * The holographic material was already fixed (Step 2) to displace in
- * **object space** via `positionNode` — so the double-transform bug that
- * blew orbs off their cores does NOT affect these big boxes either; their
- * glitch stays local to the box's own extent.
+ * Each obstacle is a `boxGeometry` rendered with the shared holographic
+ * node material. The hologram reads as a sharp-edged energy cube: a bright
+ * fresnel rim band at the silhouette + scrolling scanline bands across the
+ * faces. There is NO vertex displacement (no jelly warp) — the obstacle keeps
+ * a crisp cuboid silhouette so collisions read precisely; the hologram is
+ * purely a surface treatment.
  */
 export function ObstacleEntity({ obstacle, resolution }: ObstacleEntityProps) {
 	const visible = obstacle.exists && obstacle.alive
@@ -29,13 +26,20 @@ export function ObstacleEntity({ obstacle, resolution }: ObstacleEntityProps) {
 	const height = toWorldSize(obstacle.height)
 	const depth = obstacle.kind === 'angular_long' ? 0.28 : 0.38
 	const color = getObstacleColor(obstacle)
-	const glitchStrength = getObstacleGlitch(obstacle)
 	const intensity = getObstacleIntensity(obstacle)
 
-	// One material per obstacle instance so its `glitchStrength`/`intensity`
-	// uniforms and `color` are independent. Disposed on unmount (game reset /
-	// prune) to avoid leaking node materials. `depthWrite` stays at the default
-	// `false` so the orb spheres + orbit torus draw on top of obstacles
+	// High subdivisions so each face carries many vertices → the holographic
+	// fragment terms (fresnel + world-Y scanlines) evaluate on a fine grid
+	// and the rim band + scanlines read as crisp smooth bands instead of
+	// stair-stepped across 2 triangles per face. No vertex displacement here;
+	// the density is purely so the per-fragment hologram samples smoothly.
+	const segW = Math.max(16, Math.round(width * 10))
+	const segH = Math.max(16, Math.round(height * 12))
+	const segD = obstacle.kind === 'angular_long' ? 8 : 12
+
+	// One material per obstacle instance so its `intensity`/`color` uniforms
+	// are independent. Disposed on unmount. `depthWrite` stays at the default
+	// `false` so the orb spheres + orbit ring draw on top of obstacles
 	// (obstacles must never visually cover the orbs / ring — readability).
 	//
 	// Hooks run unconditionally (Rules of Hooks): even when the obstacle is
@@ -48,6 +52,8 @@ export function ObstacleEntity({ obstacle, resolution }: ObstacleEntityProps) {
 	// denser energy panels; colliding obstacles get the strongest fill so
 	// the collision highlight reads across the whole frame, not just the
 	// rim band.
+	// `glitchStrength: 0` disables the vertex displacement (no jelly warp) —
+	// the box keeps a crisp cuboid silhouette; only the surface is holographic.
 	const baseFill = getObstacleBaseFill(obstacle)
 	const stripeFrequency = getObstacleStripeFrequency(obstacle)
 
@@ -55,12 +61,12 @@ export function ObstacleEntity({ obstacle, resolution }: ObstacleEntityProps) {
 		() =>
 			createHolographicMaterial({
 				color,
-				glitchStrength,
+				glitchStrength: 0,
 				intensity,
 				baseFill,
 				stripeFrequency,
 			}),
-		[color, glitchStrength, intensity, baseFill, stripeFrequency],
+		[color, intensity, baseFill, stripeFrequency],
 	)
 	useEffect(() => () => material.dispose(), [material])
 
@@ -70,7 +76,7 @@ export function ObstacleEntity({ obstacle, resolution }: ObstacleEntityProps) {
 
 	return (
 		<mesh position={position} rotation={[0, 0, -obstacle.rotation]}>
-			<boxGeometry args={[width, height, depth]} />
+			<boxGeometry args={[width, height, depth, segW, segH, segD]} />
 			<primitive object={material} attach="material" />
 		</mesh>
 	)
@@ -91,18 +97,24 @@ export function ObstacleEntity({ obstacle, resolution }: ObstacleEntityProps) {
  */
 function getObstacleColor(obstacle: ObstacleState): string {
 	if (obstacle.collidingOrbSides.length > 0) {
-		return '#ffdc60'
+		return '#fff5a0'
 	}
 
+	// Gold-yellow hologram obstacles, inspired by the target reference's
+	// accent (`#ffce4d`). Variations stay in the same warm-yellow family so
+	// the whole scene reads as one gold hologram identity; per-kind nuance
+	// (slightly deeper for sturdier `static`, brighter for `moving`) lets
+	// gameplay semantics still read. All are additive-bright so the
+	// hologram rim band reads against the dark backdrop.
 	switch (obstacle.kind) {
 		case 'moving':
-			return '#c088ff'
+			return '#ffd23d'
 		case 'angular':
-			return '#5ad8d2'
+			return '#ffce4d'
 		case 'angular_long':
-			return '#ffa86a'
+			return '#ffc833'
 		case 'static':
-			return '#7aa8d8'
+			return '#e3b333'
 	}
 }
 
@@ -178,32 +190,5 @@ function getObstacleStripeFrequency(obstacle: ObstacleState): number {
 			return 32
 		case 'static':
 			return 26
-	}
-}
-
-/**
- * Per-kind holographic glitch strength. Boxes are big (a few world units
- * across), so unlike orbs (radius ~0.3) we can afford a MUCH bigger
- * displacement without the silhouette "exploding" — the reference demo
- * drives its 1-unit geometries at 0.25; here we push 0.15–0.7 so the energy
- * jitter reads clearly across the box (the user's complaint was that
- * obstacles looked static — turning the glitch up so the boxes visibly
- * shimmer/jitter). Statics still get the least (calm hull); moving +
- * colliding get a strong pulse to telegraph danger.
- */
-function getObstacleGlitch(obstacle: ObstacleState): number {
-	if (obstacle.collidingOrbSides.length > 0) {
-		return 0.8
-	}
-
-	switch (obstacle.kind) {
-		case 'moving':
-			return 0.5
-		case 'angular':
-			return 0.36
-		case 'angular_long':
-			return 0.42
-		case 'static':
-			return 0.18
 	}
 }

@@ -114,7 +114,7 @@ const _camQuat = new Quaternion()
 
 export function GalaxyBackground({
 	count = numParam('gx_count') ?? 400000,
-	radius = numParam('gx_radius') ?? 7,
+	radius = numParam('gx_radius') ?? 20,
 	branches = 5,
 	randomness = 0.2,
 	randomnessPower = 3,
@@ -124,7 +124,10 @@ export function GalaxyBackground({
 	// so per-volume additive overlap matches the reference without any
 	// compensation.
 	zSpread = numParam('gx_z') ?? 1.0,
-	insideColor = '#3a6fff',
+	// Darker blue core so the bright galaxy core does NOT wash out/compete
+	// with the gameplay orbs & obstacles (a bright insideColor made the
+	// center glare conflict with the foreground objects).
+	insideColor = '#1a2a5e',
 	outsideColor = '#0a1030',
 	pointSize = numParam('gx_ps') ?? 0.2,
 	tilt = 0.5,

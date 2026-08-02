@@ -4,10 +4,7 @@ import type { Mesh } from 'three'
 import { RingGeometry } from 'three'
 import type { GeneratorState, OrbitState } from '../game/types'
 import { toWorldPosition, toWorldSize } from '../scene/coordinates'
-import {
-	createBackDiscMaterial,
-	createOrbitRingMaterial,
-} from '../three/materials/energy'
+import { createBackDiscMaterial } from '../three/materials/energy'
 import { createHolographicMaterial } from '../three/materials/holographic'
 
 /**
@@ -19,10 +16,17 @@ const ORB_COLOR = {
 	right: '#2f6fd8',
 } as const
 
-const RING_COLOR = '#dce6ff'
+// Ring reads as a holographic energy band — same shader language as the
+// orbs & obstacles. Gold-yellow (inspired by the target reference's
+// accent) so the orbit track reads as a warm energy band.
+const RING_COLOR = '#ffce4d'
 
-const RING_THETA_SEGMENTS = 160
-const RING_PHI_SEGMENTS = 1
+// Dense theta (around the circle) + a few radial segments so the holographic
+// vertex-glitch ripples along the band instead of snapping per-corner. A
+// bare 1-segment ring has no verts on the tube to displace into a smooth
+// warp; a few phi segments give the glitch geometry to work with.
+const RING_THETA_SEGMENTS = 220
+const RING_PHI_SEGMENTS = 4
 
 type OrbitEntityProps = {
 	readonly orbit: OrbitState
@@ -46,8 +50,22 @@ export function OrbitEntity({ orbit, resolution }: OrbitEntityProps) {
 	const ringInner = orbitRadiusWorld - ringStroke
 	const ringOuter = orbitRadiusWorld + ringStroke
 
+	// Holographic ring — uses the SAME holographic material as orbs/obstacles
+	// (fresnel rim + scrolling scanlines + vertex glitch) so the orbit track
+	// reads as part of the hologram energy language instead of a flat
+	// additive wire. `baseFill` lights the annulus body with scanlines (the
+	// pure-fresnel term is ~0 face-on for the flat ring); a small glitch
+	// gives the band a subtle hologram shimmer. `intensity` sits just under
+	// the orbs so the orbs stay the brightest gameplay object.
 	const ringMaterial = useMemo(
-		() => createOrbitRingMaterial({ color: RING_COLOR, intensity: 0.9 }),
+		() =>
+			createHolographicMaterial({
+				color: RING_COLOR,
+				glitchStrength: 0.05,
+				intensity: 1.15,
+				baseFill: 0.75,
+				stripeFrequency: 26,
+			}),
 		[],
 	)
 	const ringGeometry = useMemo(
@@ -63,13 +81,15 @@ export function OrbitEntity({ orbit, resolution }: OrbitEntityProps) {
 	useEffect(() => () => ringGeometry.dispose(), [ringGeometry])
 	useEffect(() => () => ringMaterial.dispose(), [ringMaterial])
 
-	// --- Center anchor (dim holographic sphere, no pulsing core) ---
+	// --- Center anchor (dim holographic sphere, no pulsing core) —
+	// gold-yellow to match the ring/accent identity.
 	const centerMaterial = useMemo(
 		() =>
 			createHolographicMaterial({
-				color: '#3a5a78',
+				color: '#ffce4d',
 				glitchStrength: 0.05,
 				intensity: 0.7,
+				baseFill: 0.5,
 			}),
 		[],
 	)
@@ -94,11 +114,11 @@ export function OrbitEntity({ orbit, resolution }: OrbitEntityProps) {
 			))}
 
 			{/*
-				Orbit-path ring — a glowing additive annulus tracing the orbs'
-				rotation. Rendered LAST in this group on purpose: the ring's
-				material is additive with `depthTest:false` + `depthWrite:false`
-				(see `createOrbitRingMaterial`), so drawing it after the orbs
-				lets its glow paint *over* the orb bodies/cores at the two
+				Orbit-path ring — a holographic energy band (same shader as
+				orbs/obstacles) tracing the orbs' rotation. Rendered LAST in this
+				group on purpose: both the ring and orb materials are additive with
+				`depthWrite:false`, so the ring's holographic glow (scanlines +
+				fresnel + glitch) paints over the orb bodies/cores at the two
 				points where the orbit path crosses each orb — the ring visibly
 				"passes through" the orbs rather than hiding behind them.
 				`RingGeometry` is native-XY so no rotation is needed.
