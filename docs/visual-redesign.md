@@ -792,6 +792,89 @@ energy scene. The HUD is DOM, so this is pure CSS — no scene changes. Goals:
   as `.temp/screenshot-015.png` (frame-a) and `.temp/screenshot-016.png`
   (frame-b).
 
+- **Galaxy depth — iteration 8b (tilted billboard).** Iteration 8 (above)
+  sits the disc in the disc-local XY plane with Z as the thin normal, then
+  billboards the whole `<instancedMesh>` to the camera every frame. The
+  billboard is what keeps the scroll-twitch fixed (Step 6b, iter-4 root
+  cause #1): the disc rigidly tracks the camera orientation so panning/
+  pitching following the orbit center never warps the apparent nebula
+  shape. But a full face-on billboard flattens the Z-thickness — the galaxy
+  reads as a flat twirl, not the tilted disc the reference's `(3,3,3)`
+  camera shows (and you can't orbit to its back as the reference's free
+  `OrbitControls` camera lets you).
+
+  Fix: keep the billboard lock but compose it with a fixed disc-local
+  X-axis **tilt** (`tilt = 0.5 rad ≈ 28.6°`, matching the reference's tilted
+  camera angle). `useFrame` now does `camQuat.multiply(tiltQuat)` so the
+  disc is always tipped relative to the view; the disc's full 3D Z volume
+  (Z randomness restored from `* 0.3` to the reference's `* 1.0` — same
+  magnitude on all 3 axes like the reference) reads as visible depth. The
+  tilt is applied first in local space then the camera orientation, so the
+  disc stays tipped in screen space regardless of where the game camera
+  points. The tilt is exposed as a `tilt` prop on `<GalaxyBackground>` and
+  as a `tilt` GUI knob in `?galaxydebug` (debug applies it as a static
+  world-space `rotation.x` instead of a billboard, since the debug scene's
+  `OrbitControls` camera orbits the disc freely — the `tilt` knob there
+  visualizes the production look 1:1). The disc still never occludes
+  gameplay (`depthWrite:false` + `AdditiveBlending` unchanged).
+
+  Output on disk as `.temp/screenshot-019.png` (frame-a) and
+  `.temp/screenshot-020.png` (frame-b).
+
+- **Galaxy volume — iteration 8c (true additive blend, not a tilted sheet).**
+  Iterations 8/8b recovered visible depth by giving the disc real 3D Z volume
+  and presenting it at a tilt. But the disc was too SPARSE to read as a
+  volumetric glow: at `count=200000` over `radius=26` the density is
+  ~94 stars/unit² — ~27× sparser than the reference's ~2564/unit² (`count=200000, radius=5`). Individual stars remained distinguishable,
+  so the tilted disc still looked like a "duck-tape sheet of dots"
+  rather than a smoothly blended nebula.
+
+  Verified objectively with a luminance-histogram probe
+  (`screenshots/_galaxy-volsweep.spec.ts`): the bright-pixel luminance
+  distribution is the discriminator. A "sprinkled sheet" dumps pixels into
+  either the dark floor or the saturated peak with little in between (the
+  baseline measured `midRatio = mid/(all bright) = 0.033`); a true
+  volumetric glow piles pixels in the 65–130 luminance band from additive
+  stellar-quad overlap (`midRatio` rises).
+
+  Sweep over `(count, pointSize)`:
+  | label                           | totalBright | midRatio |
+  | ------------------------------- | -----------:| --------:|
+  | baseline (200k, ps0.18)          |     147,056 |   0.033  |
+  | ps0.25                          |     193,490 |   0.196  |
+  | count300k                       |     183,517 |   0.117  |
+  | count300k+ps0.25 (NEW default)  |     222,490 |   0.277  |
+  | count400k+ps0.22                |     223,744 |   0.276  |
+
+  `count=300000, pointSize=0.25` lifts `midRatio` **8.4×** (0.033 → 0.277)
+  with only a 50% count bump and no GPU strain — the clear winner.
+  `count400k+ps0.22` hits the same glow ratio at 2× the count (diminishing
+  returns past 300k+ps0.25 — extra count mostly just adds noisy overdraw
+  rather than mid-band blend depth).
+
+  New defaults encoded directly on `<GalaxyBackground>`:
+  `count=300000, pointSize=0.25`. The Z-disc thickness stays at the
+  reference's full magnitude (`randomness * r`, not `* 0.3` — see 8b), so
+  the tilted billboard now presents a real 3D *volume* of overlapping bright
+  quads at the mid-band luminance: stars aren't distinguishable points
+  anymore, the spiral arms blend into a smoothly shearing nebula where the
+  dominant motion (the `1/r` twirl) reads as gentle shear rather than
+  "individual rotating dots".
+
+  A/B overrides (`?gx_count=…&gx_ps=…`) are honored by a tiny URL-param
+  shim in `<GalaxyBackground>` so future sweeps don't need a rebuild;
+  the sweep dumps row-by-row to `.temp/volsweep/sweep.csv` so partial runs
+  (timeout on a slow combo) still leave completed rows on disk.
+
+  Full per-band stats on the new defaults: core avgLum 73 → rim avgLum 60
+  (was 71 → 50 — the gradient softened from stark into the gentle nebula
+  gradient the reference shows), 222k bright pixels, 60k mid-band glow,
+  differential twirl animating across every annulus (band 1: 27k px,
+  band 2: 47k, bands 3–4: 53k–55k changed per 1.5 s), zero WebGL errors.
+
+  Output on disk as `.temp/screenshot-021.png` (frame-a) and
+  `.temp/screenshot-022.png` (frame-b).
+
 - **Galaxy twirl + scroll-twitch fix (iteration 4, screenshot-009 — superseded
   above):** the galaxy was showing as a static, non-animating image and visibly
   jumping when the camera scrolled. Three root causes, three fixes (the

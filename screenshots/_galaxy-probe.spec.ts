@@ -25,7 +25,17 @@ async function stats(page: import('@playwright/test').Page, base64: string) {
 		const bands = 6
 		const bright = new Array(bands).fill(0)
 		const lumSum = new Array(bands).fill(0)
+		// Luminance histogram (4 buckets) — a true volumetric glow piles
+		// pixels in the mid-bright range (65–192) from additive overlap
+		// where stellar quads analytically overlap; a sparse "sprinkled
+		// sheet" pushes pixels into either the dark floor or the saturated
+		// peak (0 and 255), with little mid. Ratio mid/totalBright is a
+		// objective "how blended does the cloud read" score.
 		let totalBright = 0
+		let veryDim = 0
+		let mid = 0
+		let brightpx = 0
+		let veryBright = 0
 		const { data: d, width: w, height: h } = img
 		for (let y = 0; y < h; y += 1) {
 			for (let x = 0; x < w; x += 1) {
@@ -34,8 +44,13 @@ async function stats(page: import('@playwright/test').Page, base64: string) {
 				const g = d[i + 1]
 				const b = d[i + 2]
 				const lum = (r + g + b) / 3
-				if (lum < 40) continue
+				if (lum < 20) continue
 				totalBright++
+				if (lum < 65) veryDim++
+				else if (lum < 130) mid++
+				else if (lum < 200) brightpx++
+				else veryBright++
+				if (lum < 40) continue
 				const dx = x - cx
 				const dy = y - cy
 				const dist = Math.sqrt(dx * dx + dy * dy) / maxR
@@ -47,6 +62,8 @@ async function stats(page: import('@playwright/test').Page, base64: string) {
 		return {
 			size: `${w}x${h}`,
 			totalBright,
+			histogram: { veryDim, mid, brightpx, veryBright },
+			midRatio: totalBright ? +(mid / totalBright).toFixed(3) : 0,
 			perBand: bright.map((c, i) => ({
 				band: i,
 				r: `${(i / bands).toFixed(2)}–${((i + 1) / bands).toFixed(2)}`,

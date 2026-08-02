@@ -57,6 +57,7 @@ export interface GalaxyTuning {
 	insideColor: string
 	outsideColor: string
 	pointSize: number
+	tilt: number // disc tilt on top of camera billboard (rad)
 	offAxisDistance: number // camera initial Z
 	offAxisHeight: number // camera initial Y
 }
@@ -76,6 +77,7 @@ export const DEFAULT_TUNING: GalaxyTuning = {
 	insideColor: '#ff6030',
 	outsideColor: '#1b3984',
 	pointSize: 0.2,
+	tilt: 0.5,
 	offAxisDistance: 10,
 	offAxisHeight: 6,
 }
@@ -115,7 +117,9 @@ function buildGalaxyGeometry(t: GalaxyTuning): {
 		const sign = Math.random() < 0.5 ? 1 : -1
 		randomnesses[i3 + 0] = rpow * sign * t.randomness * r
 		randomnesses[i3 + 1] = rpow * sign * t.randomness * r
-		randomnesses[i3 + 2] = rpow * sign * t.randomness * r * 0.3
+		// Full Z thickness (matches production + reference): the disc is
+		// tilted to the camera, so this reads as visible depth.
+		randomnesses[i3 + 2] = rpow * sign * t.randomness * r
 
 		const mixed = insideColor.clone().lerp(outsideColor, r / t.radius)
 		colors[i3 + 0] = mixed.r
@@ -160,7 +164,9 @@ function GalaxyDebugScene({
 
 	// Material regenerates only on `pointSize` / `falloff` change (they fold
 	// into a TSL node constant, not a live uniform). `spin` IS a live uniform
-	// (`galaxySpin`), so scrapping the slider only mutates `galaxySpin.value`.
+	// (`galaxySpin`), so scrapping the slider only updates the uniform, NOT
+	// the material — intentionally omitted from the dep list so scrubbing
+	// the GUI slider stays smooth (no material rebuild per tick).
 	const material = useMemo(
 		() =>
 			createGalaxyMaterial({
@@ -168,9 +174,6 @@ function GalaxyDebugScene({
 				spin: tuning.spin,
 				falloff: 9,
 			}),
-		// `spin` is mirrored to the live `galaxySpin` uniform separately (the
-		// effect right below), so we DON'T rebuild the material on `spin`
-		// changes — scrubbing the GUI as fast as you can drag is the point.
 		[tuning.pointSize],
 	)
 	// Re-sync the live `galaxySpin` uniform when the GUI slider moves
@@ -215,6 +218,11 @@ function GalaxyDebugScene({
 
 	useFrame(() => {
 		controlsRef.current?.update()
+		// Apply the disc tilt as a STATIC world-space rotation on the
+		// instancedMesh (the debug scene's free OrbitControls camera orbits
+		// the disc; the tilt reproduces what the production billboard folds
+		// in, so `tilt` here visualizes the production look 1:1).
+		if (pointsRef.current) pointsRef.current.rotation.x = tuning.tilt
 	})
 
 	// Bind the lil-gui panel once.
@@ -272,6 +280,12 @@ function GalaxyDebugScene({
 			.max(2)
 			.step(0.001)
 			.onFinishChange(() => apply({ pointSize: tuning.pointSize }))
+		gui
+			.add(tuning, 'tilt')
+			.min(0)
+			.max(Math.PI / 2)
+			.step(0.001)
+			.onChange((v: number) => onTuningChange({ tilt: v }))
 		gui
 			.add(tuning, 'offAxisDistance')
 			.min(0.5)

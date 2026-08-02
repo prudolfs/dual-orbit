@@ -3,6 +3,7 @@ import { useMemo, useRef } from 'react'
 import {
 	Color,
 	DynamicDrawUsage,
+	Euler,
 	InstancedBufferAttribute,
 	type InstancedMesh,
 	PlaneGeometry,
@@ -79,37 +80,48 @@ import { createGalaxyMaterial } from '../three/materials/galaxy'
  *
  * ## Camera lock (Step 5, approach B refined)
  *
- * Each frame we billboard the disc to the camera (copy its quaternion, so the
- * disc's +Z normal always faces the view) and park it a fixed distance behind
- * the play field along the camera's own view-forward axis. Billboard + no
- * parallax + alignment to the view axis (not world -Z) means the nebula's
- * apparent shape never warps as the camera pans/pitches following the orbit
- * center → no twitch on scroll. The billboard carries NO in-plane spin (the
- * twirl comes purely from the per-vertex shader shear above).
- * `depthWrite:false` + `AdditiveBlending` → never occludes orbs/obstacles.
+ * Each frame we billboard the disc to the camera (copy its quaternion, then
+ * re-apply a fixed X-axis tilt so the disc presents at an angle rather than
+ * dead face-on — this restores the visible Z-thickness/depth the reference
+ * shows when its camera is at `(3,3,3)`), and park it a fixed distance
+ * behind the play field along the camera's own view-forward axis.
+ * Tilted-billboard + no parallax + alignment to the view axis (not world -Z)
+ * means the nebula's apparent shape never warps as the camera pans/pitches
+ * following the orbit center → no twitch on scroll. The billboard carries
+ * NO in-plane spin (the twirl comes purely from the per-vertex shader shear
+ * above). `depthWrite:false` + `AdditiveBlending` → never occludes
+ * orbs/obstacles.
  */
 
 // Opt-in kill-switch for visual tuning (docs/visual-redesign.md Step 7):
 // `?nogalaxy` skips mounting the points cloud so orb/obstacle/ring brightness
 // can be probed in isolation against the dark clear color.
-const HIDDEN =
-	typeof window !== 'undefined'
-		? new URLSearchParams(window.location.search).has('nogalaxy')
-		: false
+const SEARCH = typeof window !== 'undefined' ? window.location.search : ''
+const HIDDEN = new URLSearchParams(SEARCH).has('nogalaxy')
+
+// URL-param overrides for the volumetric-glow sweep — let a probe sweep
+// inject different `(count, pointSize)` without a rebuild. Read once at
+// module load so the per-instance props are stable for the lifetime of the
+// mounted component.
+function numParam(key: string): number | undefined {
+	const v = new URLSearchParams(SEARCH).get(key)
+	return v === null ? undefined : Number(v)
+}
 
 // Reused scratch (avoid per-frame allocation in the hot useFrame path).
 const _viewDir = new Vector3()
 const _camQuat = new Quaternion()
 
 export function GalaxyBackground({
-	count = 200000,
+	count = numParam('gx_count') ?? 300000,
 	radius = 26,
 	branches = 5,
 	randomness = 0.2,
 	randomnessPower = 3,
 	insideColor = '#3a6fff',
 	outsideColor = '#0a1030',
-	pointSize = 0.18,
+	pointSize = numParam('gx_ps') ?? 0.25,
+	tilt = 0.5,
 	behind = 14,
 }: {
 	count?: number
@@ -121,9 +133,21 @@ export function GalaxyBackground({
 	outsideColor?: string
 	/** World-space size of each star quad (× per-instance `aScale`). */
 	pointSize?: number
+	/** Radians to tip the disc-local X axis each frame, on top of the
+	 * camera billboard. `0` is dead face-on (flat); ~0.5 rad ≈ 28.6° shows
+	 * the disc at the reference's `(3,3,3)`-camera angle (visible depth). */
+	tilt?: number
 	behind?: number
 }) {
 	const root = useRef<InstancedMesh>(null)
+
+	// Tilt applied on top of the camera billboard each frame (local X axis).
+	// Pre-baked per `tilt` change so the `useFrame` path stays
+	// allocation-free. `0` reduces to the prior flat face-on billboard.
+	const tiltQuat = useMemo(
+		() => new Quaternion().setFromEuler(new Euler(tilt, 0, 0)),
+		[tilt],
+	)
 
 	// One shared 1×1 quad template; per-instance data lives in instanced
 	// buffer attributes on the geometry (`aSkeleton`, `aRandomness`,
@@ -165,8 +189,12 @@ export function GalaxyBackground({
 			const sign = Math.random() < 0.5 ? 1 : -1
 			const rx = rpow * sign * randomness * r
 			const ry = rpow * sign * randomness * r
-			// Small Z thickness so the additive stack has soft depth.
-			const rz = rpow * sign * randomness * r * 0.3
+			// Z thickness matches the reference's XY-magnitude on all 3 axes
+			// (the reference assigns the same fuzzy radius to X, Y, AND Z).
+			// With the disc now tilted to the camera (see `tilt` prop), this
+			// real 3D volume reads as visible depth instead of being
+			// compressed away by a face-on view.
+			const rz = rpow * sign * randomness * r
 			randomnesses[i3 + 0] = rx
 			randomnesses[i3 + 1] = ry
 			randomnesses[i3 + 2] = rz
@@ -215,12 +243,17 @@ export function GalaxyBackground({
 	])
 
 	// Per-frame: lock the galaxy to the camera as a true backdrop
-	// (billboarded + offset along the view-forward axis). NO in-plane spin —
-	// the twirl is the per-vertex differential rotation in the shader; a
-	// rigid whole-disc spin would mask it and read as "rotating backdrop".
+	// (billboarded + offset along the view-forward axis), then apply the
+	// fixed tilt so the disc presents at an angle and its real 3D volume
+	// reads as depth (the reference's `(3,3,3)`-camera look). NO in-plane
+	// spin — the twirl is the per-vertex differential rotation in the
+	// shader; a rigid whole-disc spin would mask it and read as a
+	// "rotating backdrop".
 	useFrame((state) => {
 		if (root.current) {
-			_camQuat.copy(state.camera.quaternion)
+			// camera billboard × tilt — first the tilt (disc-local), then the
+			// camera orientation, so the disc tips relative to the view.
+			_camQuat.copy(state.camera.quaternion).multiply(tiltQuat)
 			root.current.quaternion.copy(_camQuat)
 			state.camera.getWorldDirection(_viewDir)
 			root.current.position
