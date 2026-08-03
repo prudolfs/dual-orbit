@@ -61,7 +61,10 @@ export function ObstacleEntity({ obstacle, resolution }: ObstacleEntityProps) {
 		() =>
 			createHolographicMaterial({
 				color,
-				glitchStrength: 0,
+				// Light but visible glitch so obstacle cubes shimmer like the
+				// reference hologram (energy ripple on the surface), without
+				// destroying the crisp cuboid silhouette collisions read from.
+				glitchStrength: 0.08,
 				intensity,
 				baseFill,
 				stripeFrequency,
@@ -127,21 +130,22 @@ function getObstacleColor(obstacle: ObstacleState): string {
  */
 function getObstacleIntensity(obstacle: ObstacleState): number {
 	if (obstacle.collidingOrbSides.length > 0) {
-		return 2.2 // collision highlight pops above normal obstacle brightness
+		return 3.0 // collision highlight pops above normal obstacle brightness
 	}
 
-	// Edge-only hologram: kept at a moderate brightness so only the fresnel
-	// rim band + scanlines read — the body stays transparent. Higher values
-	// made the boxes read as solid bright panels.
+	// Edge-only hologram: brightened so the fresnel rim band + scanlines
+	// read crisply against the darker violet backdrop (closer to the
+	// reference demo's bright `#70c1ff` read on `#1d1f2a`). Body fill is
+	// kept low so the boxes still read as holographic shells, not solid.
 	switch (obstacle.kind) {
 		case 'moving':
-			return 1.5
+			return 2.4
 		case 'angular':
-			return 1.2
+			return 2.0
 		case 'angular_long':
-			return 1.3
+			return 2.2
 		case 'static':
-			return 1.1
+			return 1.8
 	}
 }
 
@@ -156,18 +160,18 @@ function getObstacleIntensity(obstacle: ObstacleState): number {
  */
 function getObstacleBaseFill(obstacle: ObstacleState): number {
 	if (obstacle.collidingOrbSides.length > 0) {
-		return 0.4
+		return 0.22
 	}
 
 	switch (obstacle.kind) {
 		case 'static':
-			return 0.15
+			return 0.06
 		case 'angular':
-			return 0.18
+			return 0.07
 		case 'angular_long':
-			return 0.2
+			return 0.08
 		case 'moving':
-			return 0.22
+			return 0.09
 	}
 }
 
@@ -179,17 +183,17 @@ function getObstacleBaseFill(obstacle: ObstacleState): number {
  */
 function getObstacleStripeFrequency(obstacle: ObstacleState): number {
 	if (obstacle.collidingOrbSides.length > 0) {
-		return 36
+		return 44
 	}
 
 	switch (obstacle.kind) {
 		case 'angular_long':
-			return 34
+			return 42
 		case 'angular':
-			return 30
+			return 38
 		case 'moving':
-			return 32
+			return 40
 		case 'static':
-			return 26
+			return 34
 	}
 }

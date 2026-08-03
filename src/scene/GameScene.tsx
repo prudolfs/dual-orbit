@@ -16,7 +16,7 @@ export function GameScene({ simulation }: GameSceneProps) {
 			{/* No lights: every gameplay mesh is a `MeshBasicNodeMaterial`
 			    (holographic/energy) which ignores lighting entirely. The
 			    scene is fully emissive/additive against this dark clear color. */}
-			<color attach="background" args={['#05060d']} />
+			<color attach="background" args={['#0a0814']} />
 			<ShaderClock />
 			{/*
 				`CameraController` is mounted BEFORE `<GalaxyBackground />` on

@@ -60,10 +60,17 @@ export function OrbitEntity({ orbit, resolution }: OrbitEntityProps) {
 		() =>
 			createHolographicMaterial({
 				color: RING_COLOR,
-				glitchStrength: 0.05,
-				intensity: 1.0,
-				baseFill: 0.2,
-				stripeFrequency: 40,
+				// Stronger along-band glitch so the energy track shimmers/ripples
+				// like the reference hologram, instead of a flat ring.
+				glitchStrength: 0.18,
+				// Brighter fresnel rim band — the ring reads as a crisp bright
+				// holographic stroke against the darker violet backdrop, not a
+				// muddy translucent band.
+				intensity: 2.2,
+				// Low body fill so the ring keeps the true-hologram look (bright
+				// edges, translucent middle) and the fresnel band dominates.
+				baseFill: 0.08,
+				stripeFrequency: 48,
 			}),
 		[],
 	)
@@ -88,8 +95,8 @@ export function OrbitEntity({ orbit, resolution }: OrbitEntityProps) {
 		() =>
 			createHolographicMaterial({
 				color: '#ffce4d',
-				glitchStrength: 0.05,
-				intensity: 0.9,
+				glitchStrength: 0.16,
+				intensity: 1.4,
 			}),
 		[],
 	)

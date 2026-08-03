@@ -124,13 +124,14 @@ export function GalaxyBackground({
 	// so per-volume additive overlap matches the reference without any
 	// compensation.
 	zSpread = numParam('gx_z') ?? 1.0,
-	// Violet/dark-violet nebula, inspired by the target reference
-	// (`screenshot-034.png`). The core is a deeper violet, the edge a near-black
-	// indigo so the backdrop never competes with the gold holographic
-	// orbs/obstacles/ring in the foreground.
-	insideColor = '#6a3df0',
-	outsideColor = '#1a1030',
-	pointSize = numParam('gx_ps') ?? 0.2,
+	// Darker violet nebula so the foreground holographic orbs/obstacles/ring
+	// pop as the brightest things on screen. Core violet stays low-key (deep
+	// indigo), the edge trails into near-black so the backdrop frames the
+	// holograms and never competes. Point size + per-instance falloff kept
+	// small so the cloud reads as a quiet distant mist, not a bright wash.
+	insideColor = '#3a1f6a',
+	outsideColor = '#0c0718',
+	pointSize = numParam('gx_ps') ?? 0.14,
 	tilt = 0.5,
 	behind = numParam('gx_behind') ?? 14,
 }: {

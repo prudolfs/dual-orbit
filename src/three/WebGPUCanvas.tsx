@@ -58,7 +58,7 @@ export async function createWebGPURenderer(
 	 * additive reads cleanly. `GameScene.tsx` still keeps the `<color>` for
 	 * any future WebGPU device path; keeping the two in sync is fine.
 	 */
-	renderer.setClearColor('#05060d', 1)
+	renderer.setClearColor('#0a0814', 1)
 	return renderer
 }
 
