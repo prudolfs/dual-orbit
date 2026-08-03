@@ -1,6 +1,7 @@
 import { ObstacleEntity } from '../entities/ObstacleEntity'
 import { OrbitEntity } from '../entities/OrbitEntity'
 import type { SimulationState } from '../game/types'
+import { HOLO_BACKDROP } from '../three/materials/holo-theme'
 import { ShaderClock } from '../three/ShaderClock'
 import { CameraController } from './CameraController'
 import { GalaxyBackground } from './GalaxyBackground'
@@ -16,7 +17,7 @@ export function GameScene({ simulation }: GameSceneProps) {
 			{/* No lights: every gameplay mesh is a `MeshBasicNodeMaterial`
 			    (holographic/energy) which ignores lighting entirely. The
 			    scene is fully emissive/additive against this dark clear color. */}
-			<color attach="background" args={['#0a0814']} />
+			<color attach="background" args={[HOLO_BACKDROP]} />
 			<ShaderClock />
 			{/*
 				`CameraController` is mounted BEFORE `<GalaxyBackground />` on

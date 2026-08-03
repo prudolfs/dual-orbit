@@ -1,32 +1,30 @@
 import { useFrame } from '@react-three/fiber'
 import { useEffect, useMemo, useRef } from 'react'
 import type { Mesh } from 'three'
-import { RingGeometry } from 'three'
+import { TorusGeometry } from 'three'
 import type { GeneratorState, OrbitState } from '../game/types'
 import { toWorldPosition, toWorldSize } from '../scene/coordinates'
 import { createBackDiscMaterial } from '../three/materials/energy'
+import {
+	CENTER,
+	ORB_COLORS,
+	ORB_CORE,
+	ORB_CORE_GEOMETRY,
+	ORB_HALO,
+	ORB_SHELL,
+	RING,
+} from '../three/materials/holo-theme'
 import { createHolographicMaterial } from '../three/materials/holographic'
 
 /**
- * Orb identity palette — explicitly red/blue. Single source of truth so the
- * HUD accent system (docs Step 6b) can mirror it.
+ * Orb identity palette — explicitly red/blue, from the shared `holo-theme`
+ * `ORB_COLORS` so the HUD accent system and `?holodebug=orbit` stay in sync.
  */
-const ORB_COLOR = {
-	left: '#d84f3f',
-	right: '#2f6fd8',
-} as const
 
 // Ring reads as a holographic energy band — same shader language as the
 // orbs & obstacles. Gold-yellow (inspired by the target reference's
 // accent) so the orbit track reads as a warm energy band.
-const RING_COLOR = '#ffce4d'
-
-// Dense theta (around the circle) + a few radial segments so the holographic
-// vertex-glitch ripples along the band instead of snapping per-corner. A
-// bare 1-segment ring has no verts on the tube to displace into a smooth
-// warp; a few phi segments give the glitch geometry to work with.
-const RING_THETA_SEGMENTS = 220
-const RING_PHI_SEGMENTS = 4
+const RING_COLOR = RING.color
 
 type OrbitEntityProps = {
 	readonly orbit: OrbitState
@@ -35,68 +33,59 @@ type OrbitEntityProps = {
 
 export function OrbitEntity({ orbit, resolution }: OrbitEntityProps) {
 	const center = toWorldPosition(orbit.center, resolution, 0.15)
-	const centerRadius = toWorldSize(14)
+	const centerRadius = toWorldSize(CENTER.radius)
 
-	// Orbit-path ring: a thin flat **annulus** (`ringGeometry`) in the orbs'
-	// XY play plane. The ring's inner radius == `orbit.radius` minus a thin
-	// tube and outer == plus a thin tube, so the ring's centerline traces the
-	// circle the two orbs travel along. Rebuilt when the live `orbit.radius`
-	// changes (only on progression).
+	// Orbit-path ring: a **torus** (`TorusGeometry`) in the orbs' XY play
+	// plane — a real 3D donut with depth/volume (NOT the flat annulus we used
+	// to use), matching the `?holodebug=orbit` debug scene 1:1. Rebuilt only
+	// when the live `orbit.radius` changes (on progression). Material consts
+	// come from the shared `RING` theme; segment counts come from
+	// `RING.tubularSegments` / `RING.radialSegments`.
 	const orbitRadiusWorld = toWorldSize(orbit.radius)
-	// Thin stroke: ~1.5% of orbit radius as the annulus width, split evenly
-	// each side of the `orbit.radius` circle. Floor at 0.012 so even tiny
-	// orbits keep a renderable line.
-	const ringStroke = Math.max(orbitRadiusWorld * 0.015, 0.012)
-	const ringInner = orbitRadiusWorld - ringStroke
-	const ringOuter = orbitRadiusWorld + ringStroke
+	// Tube radius: ~`RING.tubeRatio` of the orbit radius, floored at
+	// `RING.tubeFloor` so even tiny orbits keep a renderable tube.
+	const ringTube = Math.max(orbitRadiusWorld * RING.tubeRatio, RING.tubeFloor)
 
 	// Holographic ring — uses the SAME holographic material as orbs/obstacles
 	// (fresnel rim + scrolling scanlines) so the orbit track reads as part of
 	// the hologram energy language. TRUE hologram look: bright fresnel band at
-	// the inner & outer edges of the annulus, translucent body in between —
-	// NOT a solid stripe-filled band. `baseFill` is low (faint scroll band)
-	// and `intensity` moderate so the body doesn't read as a solid panel.
+	// the silhouette of the torus tube, translucent body — NOT a solid band.
+	// `baseFill` is low (faint scroll band) and `intensity` high so the band
+	// reads crisp + bright against the dark violet backdrop.
 	const ringMaterial = useMemo(
 		() =>
 			createHolographicMaterial({
 				color: RING_COLOR,
-				// Stronger along-band glitch so the energy track shimmers/ripples
-				// like the reference hologram, instead of a flat ring.
-				glitchStrength: 0.18,
-				// Brighter fresnel rim band — the ring reads as a crisp bright
-				// holographic stroke against the darker violet backdrop, not a
-				// muddy translucent band.
-				intensity: 2.2,
-				// Low body fill so the ring keeps the true-hologram look (bright
-				// edges, translucent middle) and the fresnel band dominates.
-				baseFill: 0.08,
-				stripeFrequency: 48,
+				glitchStrength: RING.glitchStrength,
+				intensity: RING.intensity,
+				baseFill: RING.baseFill,
+				stripeFrequency: RING.stripeFrequency,
 			}),
 		[],
 	)
 	const ringGeometry = useMemo(
 		() =>
-			new RingGeometry(
-				ringInner,
-				ringOuter,
-				RING_THETA_SEGMENTS,
-				RING_PHI_SEGMENTS,
+			new TorusGeometry(
+				orbitRadiusWorld,
+				ringTube,
+				RING.radialSegments,
+				RING.tubularSegments,
 			),
-		[ringInner, ringOuter],
+		[orbitRadiusWorld, ringTube],
 	)
 	useEffect(() => () => ringGeometry.dispose(), [ringGeometry])
 	useEffect(() => () => ringMaterial.dispose(), [ringMaterial])
 
 	// --- Center anchor (dim holographic sphere shell, no pulsing core) —
-	// gold-yellow to match the ring/accent identity. `baseFill: 0` so it's
-	// a true fresnel rim shell (bright edge, transparent middle) matching
-	// the orb hologram look, not a solid bead.
+	// gold-yellow to match the ring/accent identity. `baseFill` defaults to 0
+	// so it's a true fresnel rim shell (bright edge, transparent middle)
+	// matching the orb hologram look, not a solid bead.
 	const centerMaterial = useMemo(
 		() =>
 			createHolographicMaterial({
-				color: '#ffce4d',
-				glitchStrength: 0.16,
-				intensity: 1.4,
+				color: CENTER.color,
+				glitchStrength: CENTER.glitchStrength,
+				intensity: CENTER.intensity,
 			}),
 		[],
 	)
@@ -128,7 +117,8 @@ export function OrbitEntity({ orbit, resolution }: OrbitEntityProps) {
 				fresnel + glitch) paints over the orb bodies/cores at the two
 				points where the orbit path crosses each orb — the ring visibly
 				"passes through" the orbs rather than hiding behind them.
-				`RingGeometry` is native-XY so no rotation is needed.
+				`TorusGeometry` lies in the XY plane by default (its tube sweeps around
+				Y) so no rotation is needed — same orientation as the old annulus.
 			*/}
 			<mesh position={center}>
 				<primitive object={ringGeometry} attach="geometry" />
@@ -146,7 +136,7 @@ type OrbProps = {
 }
 
 function Orb({ orb, orbitCenter, resolution, phase }: OrbProps) {
-	const color = ORB_COLOR[orb.side]
+	const color = ORB_COLORS[orb.side]
 	const orbRadius = toWorldSize(orb.radius)
 	// z = 0.15 == orbit-ring z (the parent group's `center`). The orbs sit in
 	// the same XY plane as the ring. Because the ring is an additive overlay
@@ -161,44 +151,44 @@ function Orb({ orb, orbitCenter, resolution, phase }: OrbProps) {
 		0.15,
 	)
 
-	// Holographic shell. `intensity = 2.4` makes the fresnel rim band read as
-	// a bright energy sphere (the reference demo's signature look — a crisp
-	// bright silhouette band on a dim body). `glitchStrength 0.14` keeps
-	// ~22% displacement on the ~0.3-unit-radius sphere — visible energy
-	// shimmer without the silhouette exploding. `depthWrite=false` (default)
-	// because the orb is now a translucent additive shell; it doesn't need
-	// to occlude, and writing depth caused it to shield the additive ring
-	// behind it.
+	// Holographic shell — params from the shared `ORB_SHELL` theme so the
+	// `?holodebug=orbit` scene matches 1:1. `depthWrite=false` (default):
+	// the orb is a translucent additive shell; writing depth shielded the
+	// additive ring behind it.
 	const sphereMaterial = useMemo(
 		() =>
 			createHolographicMaterial({
 				color,
-				glitchStrength: 0.14,
-				intensity: 2.4,
-				stripeFrequency: 28,
+				glitchStrength: ORB_SHELL.glitchStrength,
+				intensity: ORB_SHELL.intensity,
+				stripeFrequency: ORB_SHELL.stripeFrequency,
 			}),
 		[color],
 	)
-	// Pulsing core — a SMALL (~0.3× orb radius) holographic shell, the SAME
-	// holographic look as the orb itself (fresnel rim + stripes + glitch),
-	// using the orb's own identity color (not tinted white — the core must
-	// read as the same energy as the orb, just tighter and *pulsing*). No
-	// `baseFill`: like the orb shell it's a pure fresnel shell so it shows
-	// the same hologram band. The `pulse` option modulates the whole
-	// holographic field (0.4..1.0) at its own speed/phase, making the core
-	// visibly beat, out of sync with the static shell.
+	// Pulsing core — small (~`ORB_CORE.radiusRatio`× orb radius) holographic
+	// shell, same shader as the orb. Per-orb `phase` (π/2 offset between
+	// left/right) makes the two cores beat out of sync. Params (incl. pulse
+	// speed/floor/amp) live in the shared `ORB_CORE` theme.
 	const coreMaterial = useMemo(
 		() =>
 			createHolographicMaterial({
 				color,
-				glitchStrength: 0.08,
-				intensity: 2.0,
-				stripeFrequency: 40,
-				pulse: { speed: 1.8, phase, floor: 0.5, amp: 0.5 },
+				glitchStrength: ORB_CORE.glitchStrength,
+				intensity: ORB_CORE.intensity,
+				stripeFrequency: ORB_CORE.stripeFrequency,
+				pulse: {
+					speed: ORB_CORE.pulse.speed,
+					phase,
+					floor: ORB_CORE.pulse.floor,
+					amp: ORB_CORE.pulse.amp,
+				},
 			}),
 		[color, phase],
 	)
-	const discMaterial = useMemo(() => createBackDiscMaterial({ color }), [color])
+	const discMaterial = useMemo(
+		() => createBackDiscMaterial({ color, intensity: ORB_HALO.intensity }),
+		[color],
+	)
 	useEffect(
 		() => () => {
 			sphereMaterial.dispose()
@@ -211,13 +201,14 @@ function Orb({ orb, orbitCenter, resolution, phase }: OrbProps) {
 	const sphereRef = useRef<Mesh>(null)
 	const coreRef = useRef<Mesh>(null)
 	const discRef = useRef<Mesh>(null)
-	// Halo envelope (~2.6× orb radius) so it clearly surrounds the additive
-	// fresnel glow without overpowering the orb identity color.
-	const discScale = orbRadius * 2.8
+	// Halo envelope (`ORB_HALO.scaleRatio`× orb radius) so it clearly
+	// surrounds the additive fresnel glow without overpowering the orb
+	// identity color.
+	const discScale = orbRadius * ORB_HALO.scaleRatio
 	const coreZ = 0.02 // tiny offset so additive core sits in front of sphere
-	// Core is smaller (~0.3× orb radius) than the shell — a tight bright
-	// hologram bead rather than a fat second sphere.
-	const coreRadius = orbRadius * 0.3
+	// Core is smaller (`ORB_CORE.radiusRatio`× orb radius) than the shell — a
+	// tight bright hologram bead rather than a fat second sphere.
+	const coreRadius = orbRadius * ORB_CORE.radiusRatio
 
 	useFrame((state) => {
 		const dt = state.clock.getDelta()
@@ -225,15 +216,15 @@ function Orb({ orb, orbitCenter, resolution, phase }: OrbProps) {
 		// the scanlines cascade across the silhouette as the sphere tilts
 		// (y-only spin would leave stripes pinned to the silhouette).
 		if (sphereRef.current) {
-			sphereRef.current.rotation.x -= 1.2 * dt
-			sphereRef.current.rotation.y += 2.0 * dt
+			sphereRef.current.rotation.x += ORB_SHELL.spinX * dt
+			sphereRef.current.rotation.y += ORB_SHELL.spinY * dt
 		}
 		// Spin the CORE in the OPPOSITE direction to the shell so the two
 		// hologram fields counter-rotate — the core reads as a distinct
 		// ticking energy bead inside the shell, not a mini-echo of it.
 		if (coreRef.current) {
-			coreRef.current.rotation.x += 1.6 * dt
-			coreRef.current.rotation.y -= 2.4 * dt
+			coreRef.current.rotation.x += ORB_CORE.spinX * dt
+			coreRef.current.rotation.y += ORB_CORE.spinY * dt
 		}
 		// Billboard the halo plane to face the camera.
 		if (discRef.current) {
@@ -255,7 +246,9 @@ function Orb({ orb, orbitCenter, resolution, phase }: OrbProps) {
 				additive overlays on top.
 			*/}
 			<mesh ref={sphereRef}>
-				<sphereGeometry args={[orbRadius, 32, 18]} />
+				<sphereGeometry
+					args={[orbRadius, ORB_SHELL.widthSegments, ORB_SHELL.heightSegments]}
+				/>
 				<primitive object={sphereMaterial} attach="material" />
 			</mesh>
 
@@ -267,7 +260,13 @@ function Orb({ orb, orbitCenter, resolution, phase }: OrbProps) {
 				vs the shell.
 			*/}
 			<mesh ref={coreRef} position={[0, 0, coreZ]}>
-				<sphereGeometry args={[coreRadius, 20, 14]} />
+				<sphereGeometry
+					args={[
+						coreRadius,
+						ORB_CORE_GEOMETRY.widthSegments,
+						ORB_CORE_GEOMETRY.heightSegments,
+					]}
+				/>
 				<primitive object={coreMaterial} attach="material" />
 			</mesh>
 		</group>

@@ -5,6 +5,14 @@ import {
 	GalaxyDebug,
 	type GalaxyTuning,
 } from './debug/GalaxyDebug'
+import {
+	DEFAULT_OBSTACLE_TUNING,
+	DEFAULT_ORBIT_TUNING,
+	HologramDebug,
+	type HoloDebugMode,
+	type ObstacleTuning,
+	type OrbitTuning,
+} from './debug/HologramDebug'
 import { driveFrame, installBotIfDev } from './game/bot/installer'
 import {
 	advanceFixedSimulation,
@@ -21,6 +29,30 @@ function App() {
 		typeof window !== 'undefined'
 			? new URLSearchParams(window.location.search).has('galaxydebug')
 			: false
+
+	const holoDebug =
+		typeof window !== 'undefined'
+			? new URLSearchParams(window.location.search).get('holodebug')
+			: null
+
+	if (holoDebug === 'obstacle' || holoDebug === 'orbit') {
+		const mode: HoloDebugMode = holoDebug
+		const tuning: ObstacleTuning | OrbitTuning =
+			mode === 'obstacle'
+				? { ...DEFAULT_OBSTACLE_TUNING }
+				: { ...DEFAULT_ORBIT_TUNING }
+		return (
+			<main className="game-shell" style={{ padding: 0 }}>
+				<section
+					className="game-stage"
+					aria-label="Hologram tuning debug"
+					style={{ position: 'relative' }}
+				>
+					<HologramDebug mode={mode} tuning={tuning} />
+				</section>
+			</main>
+		)
+	}
 
 	if (galaxyDebug) {
 		const sp =

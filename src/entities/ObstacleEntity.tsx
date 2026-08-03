@@ -1,6 +1,8 @@
 import { useEffect, useMemo } from 'react'
 import type { GeneratorState, ObstacleState } from '../game/types'
+import type { ObstacleKind } from '../game/types/obstacle'
 import { toWorldPosition, toWorldSize } from '../scene/coordinates'
+import { OBSTACLE } from '../three/materials/holo-theme'
 import { createHolographicMaterial } from '../three/materials/holographic'
 
 type ObstacleEntityProps = {
@@ -64,7 +66,9 @@ export function ObstacleEntity({ obstacle, resolution }: ObstacleEntityProps) {
 				// Light but visible glitch so obstacle cubes shimmer like the
 				// reference hologram (energy ripple on the surface), without
 				// destroying the crisp cuboid silhouette collisions read from.
-				glitchStrength: 0.08,
+				// Value comes from the shared `OBSTACLE` theme so the
+				// `?holodebug=obstacle` debug scene stays in sync.
+				glitchStrength: OBSTACLE.glitchStrength,
 				intensity,
 				baseFill,
 				stripeFrequency,
@@ -88,112 +92,42 @@ export function ObstacleEntity({ obstacle, resolution }: ObstacleEntityProps) {
 // --- per-kind palette + glitch --------------------------------------------
 
 /**
- * Per-kind color feeding the holographic (additive) material. Additive
- * blending contributes `color.rgb * holographic_alpha`. The alpha is a thin
- * fresnel *band* (0 at face-on, 0 at the silhouette, bright mid-surface),
- * so a box face is mostly invisible except its angled rim band. To make
- * that band read against the dark `#05060d` backdrop, colors are kept bright
- * / saturated (mirroring the reference demo's bright `#70c1ff`); `static` is
- * the dimmest cool slate so it reads as a quiet hull, but still bright
- * enough for the rim band to show. (Bumping `intensity` alone can't brighten
- * a dim color — the color itself must be luminous under additive.)
+ * Per-kind color feeding the holographic (additive) material. Values come
+ * from the shared `OBSTACLE` theme (`holo-theme.ts`, the SINGLE source of
+ * truth shared with `?holodebug=obstacle`), so tuning the debug scene stays
+ * in sync with the game. Additive blending contributes
+ * `color.rgb * holographic_alpha`; the alpha is a thin fresnel *band*, so a
+ * box face is mostly invisible except its angled rim band. To make that band
+ * read against the dark violet backdrop, colors are kept bright/saturated
+ * (mirroring the reference demo's bright `#70c1ff`).
  */
 function getObstacleColor(obstacle: ObstacleState): string {
 	if (obstacle.collidingOrbSides.length > 0) {
-		return '#fff5a0'
+		return OBSTACLE.collision.color
 	}
-
-	// Gold-yellow hologram obstacles, inspired by the target reference's
-	// accent (`#ffce4d`). Variations stay in the same warm-yellow family so
-	// the whole scene reads as one gold hologram identity; per-kind nuance
-	// (slightly deeper for sturdier `static`, brighter for `moving`) lets
-	// gameplay semantics still read. All are additive-bright so the
-	// hologram rim band reads against the dark backdrop.
-	switch (obstacle.kind) {
-		case 'moving':
-			return '#ffd23d'
-		case 'angular':
-			return '#ffce4d'
-		case 'angular_long':
-			return '#ffc833'
-		case 'static':
-			return '#e3b333'
-	}
+	return OBSTACLE.byKind[obstacle.kind as ObstacleKind].color
 }
 
-/**
- * Per-kind overall brightness of the holographic material. Scales both
- * the scanline body fill and the fresnel rim band. Obstacles read as the
- * SAME holographic-shell look as the orbs (fresnel rim band + scrolling
- * stripes + glitch), just in different colors — so they sit at orb-level
- * brightness (orb spheres use 2.4). Collisions get a bright pop.
- */
+/** Per-kind brightness — see `OBSTACLE.byKind.<kind>.intensity`. */
 function getObstacleIntensity(obstacle: ObstacleState): number {
 	if (obstacle.collidingOrbSides.length > 0) {
-		return 3.0 // collision highlight pops above normal obstacle brightness
+		return OBSTACLE.collision.intensity
 	}
-
-	// Edge-only hologram: brightened so the fresnel rim band + scanlines
-	// read crisply against the darker violet backdrop (closer to the
-	// reference demo's bright `#70c1ff` read on `#1d1f2a`). Body fill is
-	// kept low so the boxes still read as holographic shells, not solid.
-	switch (obstacle.kind) {
-		case 'moving':
-			return 2.4
-		case 'angular':
-			return 2.0
-		case 'angular_long':
-			return 2.2
-		case 'static':
-			return 1.8
-	}
+	return OBSTACLE.byKind[obstacle.kind as ObstacleKind].intensity
 }
 
-/**
- * Per-kind scanline body fill (see HolographicOptions.baseFill). For the
- * true hologram look (bright edges, transparent middle) this is now kept
- * LOW — just enough so a flat face facing the camera isn't pure empty,
- * letting the fresnel rim band dominate. The plain `baseFill=0` reference
- * is 0 face-on, so a totally empty face can read as "invisible box"; a touch
- * (~0.15–0.25) gives a faint moving scanline field that reads as holographic
- * panel texture without filling the body solid.
- */
+/** Per-kind scanline body fill — see `OBSTACLE.byKind.<kind>.baseFill`. */
 function getObstacleBaseFill(obstacle: ObstacleState): number {
 	if (obstacle.collidingOrbSides.length > 0) {
-		return 0.22
+		return OBSTACLE.collision.baseFill
 	}
-
-	switch (obstacle.kind) {
-		case 'static':
-			return 0.06
-		case 'angular':
-			return 0.07
-		case 'angular_long':
-			return 0.08
-		case 'moving':
-			return 0.09
-	}
+	return OBSTACLE.byKind[obstacle.kind as ObstacleKind].baseFill
 }
 
-/**
- * Per-kind scanline frequency along world Y (higher = tighter stripes). The
- * holographic reference demo reads as tight crisp scanlines; bigger boxes can
- * carry more stripes without smearing, so the long angular bar gets the
- * densest field.
- */
+/** Per-kind scanline frequency — see `OBSTACLE.byKind.<kind>.stripeFrequency`. */
 function getObstacleStripeFrequency(obstacle: ObstacleState): number {
 	if (obstacle.collidingOrbSides.length > 0) {
-		return 44
+		return OBSTACLE.collision.stripeFrequency
 	}
-
-	switch (obstacle.kind) {
-		case 'angular_long':
-			return 42
-		case 'angular':
-			return 38
-		case 'moving':
-			return 40
-		case 'static':
-			return 34
-	}
+	return OBSTACLE.byKind[obstacle.kind as ObstacleKind].stripeFrequency
 }

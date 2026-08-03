@@ -1,6 +1,7 @@
 import { useFrame, useThree } from '@react-three/fiber'
 import type { DefaultGLProps } from '@react-three/fiber/dist/declarations/src/core/renderer.js'
 import { WebGPURenderer } from 'three/webgpu'
+import { HOLO_BACKDROP } from './materials/holo-theme'
 
 /**
  * R3F → WebGPU renderer integration.
@@ -58,7 +59,7 @@ export async function createWebGPURenderer(
 	 * additive reads cleanly. `GameScene.tsx` still keeps the `<color>` for
 	 * any future WebGPU device path; keeping the two in sync is fine.
 	 */
-	renderer.setClearColor('#0a0814', 1)
+	renderer.setClearColor(HOLO_BACKDROP, 1)
 	return renderer
 }
 
