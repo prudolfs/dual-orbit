@@ -124,11 +124,12 @@ export function GalaxyBackground({
 	// so per-volume additive overlap matches the reference without any
 	// compensation.
 	zSpread = numParam('gx_z') ?? 1.0,
-	// Darker blue core so the bright galaxy core does NOT wash out/compete
-	// with the gameplay orbs & obstacles (a bright insideColor made the
-	// center glare conflict with the foreground objects).
-	insideColor = '#1a2a5e',
-	outsideColor = '#0a1030',
+	// Violet/dark-violet nebula, inspired by the target reference
+	// (`screenshot-034.png`). The core is a deeper violet, the edge a near-black
+	// indigo so the backdrop never competes with the gold holographic
+	// orbs/obstacles/ring in the foreground.
+	insideColor = '#6a3df0',
+	outsideColor = '#1a1030',
 	pointSize = numParam('gx_ps') ?? 0.2,
 	tilt = 0.5,
 	behind = numParam('gx_behind') ?? 14,

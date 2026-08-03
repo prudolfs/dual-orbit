@@ -51,20 +51,19 @@ export function OrbitEntity({ orbit, resolution }: OrbitEntityProps) {
 	const ringOuter = orbitRadiusWorld + ringStroke
 
 	// Holographic ring — uses the SAME holographic material as orbs/obstacles
-	// (fresnel rim + scrolling scanlines + vertex glitch) so the orbit track
-	// reads as part of the hologram energy language instead of a flat
-	// additive wire. `baseFill` lights the annulus body with scanlines (the
-	// pure-fresnel term is ~0 face-on for the flat ring); a small glitch
-	// gives the band a subtle hologram shimmer. `intensity` sits just under
-	// the orbs so the orbs stay the brightest gameplay object.
+	// (fresnel rim + scrolling scanlines) so the orbit track reads as part of
+	// the hologram energy language. TRUE hologram look: bright fresnel band at
+	// the inner & outer edges of the annulus, translucent body in between —
+	// NOT a solid stripe-filled band. `baseFill` is low (faint scroll band)
+	// and `intensity` moderate so the body doesn't read as a solid panel.
 	const ringMaterial = useMemo(
 		() =>
 			createHolographicMaterial({
 				color: RING_COLOR,
 				glitchStrength: 0.05,
-				intensity: 1.15,
-				baseFill: 0.75,
-				stripeFrequency: 26,
+				intensity: 1.0,
+				baseFill: 0.2,
+				stripeFrequency: 40,
 			}),
 		[],
 	)
@@ -81,15 +80,16 @@ export function OrbitEntity({ orbit, resolution }: OrbitEntityProps) {
 	useEffect(() => () => ringGeometry.dispose(), [ringGeometry])
 	useEffect(() => () => ringMaterial.dispose(), [ringMaterial])
 
-	// --- Center anchor (dim holographic sphere, no pulsing core) —
-	// gold-yellow to match the ring/accent identity.
+	// --- Center anchor (dim holographic sphere shell, no pulsing core) —
+	// gold-yellow to match the ring/accent identity. `baseFill: 0` so it's
+	// a true fresnel rim shell (bright edge, transparent middle) matching
+	// the orb hologram look, not a solid bead.
 	const centerMaterial = useMemo(
 		() =>
 			createHolographicMaterial({
 				color: '#ffce4d',
 				glitchStrength: 0.05,
-				intensity: 0.7,
-				baseFill: 0.5,
+				intensity: 0.9,
 			}),
 		[],
 	)

@@ -127,46 +127,47 @@ function getObstacleColor(obstacle: ObstacleState): string {
  */
 function getObstacleIntensity(obstacle: ObstacleState): number {
 	if (obstacle.collidingOrbSides.length > 0) {
-		return 3.0 // collision highlight pops above orb brightness
+		return 2.2 // collision highlight pops above normal obstacle brightness
 	}
 
+	// Edge-only hologram: kept at a moderate brightness so only the fresnel
+	// rim band + scanlines read — the body stays transparent. Higher values
+	// made the boxes read as solid bright panels.
 	switch (obstacle.kind) {
 		case 'moving':
-			return 2.6
+			return 1.5
 		case 'angular':
-			return 2.2
+			return 1.2
 		case 'angular_long':
-			return 2.4
+			return 1.3
 		case 'static':
-			return 2.0
+			return 1.1
 	}
 }
 
 /**
- * Per-kind scanline body fill (see HolographicOptions.baseFill). Obstacles
- * read as **holographic energy** like the orbs: visible **scrolling
- * scanlines** across the faces + a bright **fresnel rim** at the silhouette
- * edges + glitch jitter. A `baseFill` of ~0.8–1.0 makes the face a moving
- * stripe field (NOT a solid panel — the pure fresnel formula is 0 face-on
- * so even with this fill the centre stays translucent and the rim dominates
- * the silhouette). Without it the box reads as just an empty outline, not a
- * hologram. Collision gets a stronger fill so the warning reads across the
- * whole frame.
+ * Per-kind scanline body fill (see HolographicOptions.baseFill). For the
+ * true hologram look (bright edges, transparent middle) this is now kept
+ * LOW — just enough so a flat face facing the camera isn't pure empty,
+ * letting the fresnel rim band dominate. The plain `baseFill=0` reference
+ * is 0 face-on, so a totally empty face can read as "invisible box"; a touch
+ * (~0.15–0.25) gives a faint moving scanline field that reads as holographic
+ * panel texture without filling the body solid.
  */
 function getObstacleBaseFill(obstacle: ObstacleState): number {
 	if (obstacle.collidingOrbSides.length > 0) {
-		return 1.4
+		return 0.4
 	}
 
 	switch (obstacle.kind) {
 		case 'static':
-			return 0.7
+			return 0.15
 		case 'angular':
-			return 0.8
+			return 0.18
 		case 'angular_long':
-			return 0.85
+			return 0.2
 		case 'moving':
-			return 0.9
+			return 0.22
 	}
 }
 
