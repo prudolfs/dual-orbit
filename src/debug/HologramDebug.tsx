@@ -1,3 +1,4 @@
+import { RoundedBoxGeometry } from '@react-three/drei'
 import { Canvas, useFrame, useThree } from '@react-three/fiber'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { type Mesh, TorusGeometry } from 'three'
@@ -11,6 +12,7 @@ import {
 	CENTER,
 	HOLO_BACKDROP,
 	OBSTACLE,
+	OBSTACLE_BEVEL,
 	ORB_COLORS,
 	ORB_CORE,
 	ORB_CORE_GEOMETRY,
@@ -67,6 +69,13 @@ export interface ObstacleTuning extends HoloTuning {
 	width: number
 	height: number
 	depth: number
+	/** Corner bevel radius (absolute world units in the debug scene; production
+	 *  derives it as a fraction of the smallest box dim via `OBSTACLE_BEVEL`). */
+	bevelRadius: number
+	/** Per-corner arc subdivision (drei `RoundedBoxGeometry.bevelSegments`). */
+	bevelSegments: number
+	/** Corner-curve smoothness (drei `RoundedBoxGeometry.smoothness`). */
+	smoothness: number
 	segW: number
 	segH: number
 	segD: number
@@ -130,6 +139,15 @@ export const DEFAULT_OBSTACLE_TUNING: ObstacleTuning = {
 	width: 0.6,
 	height: 0.45,
 	depth: 0.38,
+	// Bevel defaults from the shared `OBSTACLE_BEVEL` theme so the debug
+	// scene opens at EXACTLY what production renders — production now reads
+	// `OBSTACLE_BEVEL.radius` (an absolute tuned world radius), and the GUI
+	// slider here starts at that same value, so `?holodebug=obstacle` and the
+	// in-game obstacles start identical. Scrub the slider → copy the
+	// dialed-good number back into `OBSTACLE_BEVEL.radius` and both update.
+	bevelRadius: OBSTACLE_BEVEL.radius,
+	bevelSegments: OBSTACLE_BEVEL.bevelSegments,
+	smoothness: OBSTACLE_BEVEL.smoothness,
 	segW: 16,
 	segH: 16,
 	segD: 12,
@@ -255,25 +273,12 @@ function ObstacleDebugScene({
 		mat.baseFill.value = tuning.baseFill
 	}, [mat, tuning.baseFill])
 
-	// Geometry changes (segment density) rebuild the attribute.
+	// Geometry (box dimensions only; the bevel radius / arc density are fed
+	// directly to `RoundedBoxGeometry` props below — the segment density knob
+	// is now the per-corner arc, not face subdivision).
 	const boxArgs = useMemo(
-		() =>
-			[
-				tuning.width,
-				tuning.height,
-				tuning.depth,
-				tuning.segW,
-				tuning.segH,
-				tuning.segD,
-			] as const,
-		[
-			tuning.width,
-			tuning.height,
-			tuning.depth,
-			tuning.segW,
-			tuning.segH,
-			tuning.segD,
-		],
+		() => [tuning.width, tuning.height, tuning.depth] as const,
+		[tuning.width, tuning.height, tuning.depth],
 	)
 
 	// Cleanup material on unmount / rebuild.
@@ -341,29 +346,35 @@ function ObstacleDebugScene({
 			.step(0.01)
 			.onFinishChange(() => apply({ depth: tuning.depth }))
 		geo
-			.add(tuning, 'segW')
-			.min(1)
-			.max(64)
-			.step(1)
-			.onFinishChange(() => apply({ segW: tuning.segW }))
-		geo
-			.add(tuning, 'segH')
-			.min(1)
-			.max(64)
-			.step(1)
-			.onFinishChange(() => apply({ segH: tuning.segH }))
-		geo
-			.add(tuning, 'segD')
-			.min(1)
-			.max(32)
-			.step(1)
-			.onFinishChange(() => apply({ segD: tuning.segD }))
-		geo
 			.add(tuning, 'rotation')
 			.min(-Math.PI)
 			.max(Math.PI)
 			.step(0.01)
 			.onChange((v: number) => apply({ rotation: v }))
+
+		// Bevel (rounded-edge) controls — these are the knobs that turn the
+		// sharp cube into the glitchy orb-like silhouette. Tuned values copy
+		// back into `OBSTACLE_BEVEL` in `holo-theme.ts` (the single source the
+		// production `ObstacleEntity` reads), keeping the debug scene in sync.
+		const bevel = gui.addFolder('Bevel')
+		bevel
+			.add(tuning, 'bevelRadius')
+			.min(0)
+			.max(0.5)
+			.step(0.005)
+			.onChange((v: number) => apply({ bevelRadius: v }))
+		bevel
+			.add(tuning, 'bevelSegments')
+			.min(0)
+			.max(16)
+			.step(1)
+			.onFinishChange(() => apply({ bevelSegments: tuning.bevelSegments }))
+		bevel
+			.add(tuning, 'smoothness')
+			.min(0)
+			.max(16)
+			.step(1)
+			.onFinishChange(() => apply({ smoothness: tuning.smoothness }))
 
 		return () => gui.destroy()
 		// eslint-disable-next-line react-hooks/exhaustive-dependencies
@@ -371,7 +382,20 @@ function ObstacleDebugScene({
 
 	return (
 		<mesh rotation={[0, 0, -tuning.rotation]}>
-			<boxGeometry args={[...boxArgs]} />
+			{/*
+				Beveled (rounded-edge) cube — drei's `RoundedBoxGeometry` wraps
+				`ExtrudeGeometry` + `toCreasedNormals`, preserving per-vertex
+				normals so the holographic fresnel reads smoothly across the
+				rounded corners. The bevel radius / arc density come from the
+				GUI + `OBSTACLE_BEVEL`, matching production `ObstacleEntity` so
+				whatever you dial here is exactly what ships.
+			*/}
+			<RoundedBoxGeometry
+				args={boxArgs as [number, number, number]}
+				radius={tuning.bevelRadius}
+				bevelSegments={tuning.bevelSegments}
+				smoothness={tuning.smoothness}
+			/>
 			<primitive object={material} attach="material" />
 		</mesh>
 	)
