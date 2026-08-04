@@ -1,5 +1,6 @@
 import { useFrame, useThree } from '@react-three/fiber'
 import type { DefaultGLProps } from '@react-three/fiber/dist/declarations/src/core/renderer.js'
+import { useRef } from 'react'
 import { WebGPURenderer } from 'three/webgpu'
 import { HOLO_BACKDROP } from './materials/holo-theme'
 
@@ -68,8 +69,30 @@ export function RenderLoop() {
 	const scene = useThree((state) => state.scene)
 	const camera = useThree((state) => state.camera)
 
+	// `WebGPURenderer.renderAsync` (in-flight across rAF boundaries on the
+	// forced WebGL backend, and especially slow in headless Chromium — the
+	// README-header capture build) can stack up: each rAF tick kicks a new
+	// async render before the previous one resolves, saturating the
+	// microtask queue and starving `requestAnimationFrame` so badly that the
+	// bot bridge's per-`useFrame` stepping (priority 0) stops firing often
+	// enough for the longer showcase scenarios to reach their capture ticks.
+	//
+	// Guard against re-entry: skip a frame when the previous `renderAsync`
+	// hasn't completed. This caps the work in flight at one render, so
+	// `requestAnimationFrame` keeps its cadence and the slim priority-0
+	// subscribers (the simulation ticker) keep stepping once per frame. The
+	// visual effect is unchanged — at the display refresh rate `renderAsync`
+	// resolves well within a frame, and skipping a stacked call only drops a
+	// redundant render that would have drawn nothing new.
+	const rendering = useRef(false)
 	useFrame(async () => {
-		await gl.renderAsync(scene, camera)
+		if (rendering.current) return
+		rendering.current = true
+		try {
+			await gl.renderAsync(scene, camera)
+		} finally {
+			rendering.current = false
+		}
 	}, 1)
 
 	return null

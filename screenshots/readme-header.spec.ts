@@ -129,7 +129,16 @@ async function playAndCapture(
 	// `(startFrame - 1) + expected` frames on disk.
 	const expected = captureTicks.length
 	const target = startFrame - 1 + expected
-	const deadline = Date.now() + 30_000
+	// Generous: the WebGPURenderer-on-WebGL backend renders slowly under
+	// headless Chromium's software renderer (~0.5–2 rAF/s), so the bot bridge
+	// — which steps exactly one deterministic tick per `useFrame` — needs many
+	// wall-clock seconds to reach the longer showcase scenarios' capture ticks
+	// (the rotating-bar entry drives 22 ticks). The per-entry poll has to be
+	// long enough to absorb that cadence; bumping it does not change capture
+	// correctness, only how long the build waits. See
+	// `src/three/WebGPUCanvas.tsx` `RenderLoop` for the render-loop guard that
+	// keeps stacked `renderAsync` calls from compounding the stall further.
+	const deadline = Date.now() + 180_000
 	let written = await readdir(framesDir)
 	let writtenCount = written.filter(
 		(f) => f.startsWith('frame-') && f.endsWith('.png'),
@@ -209,8 +218,9 @@ test('capture README header frames across the showcase sequence', async ({
 
 	// Poll until every expected frame has landed on disk (one more sweep
 	// after the per-scenario waits cover any hiccups landing the final
-	// screenshot to disk).
-	const deadline = Date.now() + 30_000
+	// screenshot to disk). Mirrors the generous per-entry window above — the
+	// slow headless render cadence means the final screenshot write can lag.
+	const deadline = Date.now() + 60_000
 	let written = await readdir(framesDir)
 	let frameCount = written.filter(
 		(file) => file.startsWith('frame-') && file.endsWith('.png'),
