@@ -33,11 +33,12 @@ export function createBackDiscMaterial({
 }): BackDiscMaterial {
 	const uIntensity = uniform(intensity)
 
-	const alpha = Fn((): Node<'float'> => {
+	function buildAlpha(): Node<'float'> {
 		const d = distance(uv(), vec2(0.5)).mul(2)
 		const falloff = sub(1, d)
 		return pow(falloff, 3).mul(uIntensity)
-	})()
+	}
+	const alpha = Fn(buildAlpha)()
 
 	const material = new MeshBasicNodeMaterial()
 	material.color = new Color(color)

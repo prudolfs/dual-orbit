@@ -54,8 +54,9 @@ import { time } from '../shaders/shared'
  */
 
 // random2D(value) -> fract(sin(dot(value, vec2(12.9898, 78.233))) * 43758.5453123)
-const random2D = (value: Node<'vec2'>) =>
-	fract(sin(dot(value, vec2(12.9898, 78.233))).mul(43758.5453123))
+function random2D(value: Node<'vec2'>): Node<'float'> {
+	return fract(sin(dot(value, vec2(12.9898, 78.233))).mul(43758.5453123))
+}
 
 export type HolographicOptions = {
 	readonly color: Color | string | number
@@ -128,7 +129,7 @@ export function createHolographicMaterial({
 	const depthWriteFlag = depthWrite
 
 	// --- Stage 1 — vertex glitch in OBJECT space --------------------------------
-	const displacedLocal = Fn((): Node<'vec3'> => {
+	function buildDisplacedLocal(): Node<'vec3'> {
 		const pos = positionLocal.toVar()
 
 		// Time-driven multi-sine glitch factor smoothed to [0,1]. Widened
@@ -149,14 +150,15 @@ export function createHolographicMaterial({
 			.sub(0.5)
 			.mul(glitch)
 		return vec3(pos.x.add(offsetX), pos.y, pos.z.add(offsetZ))
-	})()
+	}
+	const displacedLocal = Fn(buildDisplacedLocal)()
 
 	// --- Stage 2 — fragment alpha -----------------------------------------------
 	// Reference: `holographic = (stripes*fresnel + fresnel*1.25) * falloff`.
 	// We add a view-independent `baseFill` scanline band so flat obstacle box
 	// faces read as a holographic panel front-on (the pure fresnel formula is
 	// 0 at face-on → boxes with a full face pointing at the camera vanish).
-	const alpha = Fn((): Node<'float'> => {
+	function buildAlpha(): Node<'float'> {
 		const pos = positionWorld.toVar()
 
 		// normal flipped on back faces (== reference's
@@ -203,7 +205,8 @@ export function createHolographicMaterial({
 		// the fresnel band so the silhouette rim reads in-hue (matches the
 		// reference's uniform uColor, but lets body fill stay mid-bright).
 		return bodyFill.add(holographic).mul(intensityUniform).mul(pulseTerm)
-	})()
+	}
+	const alpha = Fn(buildAlpha)()
 
 	const material = new MeshBasicNodeMaterial()
 	material.color = new Color(color)

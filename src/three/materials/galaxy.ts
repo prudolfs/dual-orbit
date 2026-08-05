@@ -117,7 +117,7 @@ export function createGalaxyMaterial(
 
 	// Per-instance twirl. `time` is the shared TSL uniform advanced by
 	// `<ShaderClock>`.
-	const positionNode = Fn(() => {
+	function buildPositionNode() {
 		// The quad corner in object space, XY in [-0.5, 0.5], Z = 0.
 		const corner = vec3(positionLocal).toVar()
 
@@ -139,16 +139,18 @@ export function createGalaxyMaterial(
 		// Quad is in the disc-local XY plane (Z stays 0 — thin disc), so the
 		// quad's Z offset is aSkeleton.z + aRandomness.z.
 		return twirled.add(aRandomness).add(vec3(corner.xy.mul(size), 0))
-	})()
+	}
+	const positionNode = Fn(buildPositionNode)()
 
 	// Soft round point + per-instance color. AdditiveBlending: the RGB must
 	// fade to 0 at the quad edges (alpha is irrelevant), so we mask the color
 	// rather than the opacity.
-	const colorNode = Fn(() => {
+	function buildColorNode() {
 		const pd = distance(uv, vec2(0.5))
 		const strength = float(1.0).sub(pd).pow(falloff)
 		return aColor.mul(strength)
-	})()
+	}
+	const colorNode = Fn(buildColorNode)()
 
 	const mat = new MeshBasicNodeMaterial()
 	mat.transparent = true
