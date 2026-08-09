@@ -90,6 +90,7 @@ function Game() {
 	)
 	const accumulatorRef = useRef(0)
 	const inputRef = useKeyboardInput()
+	const pausedRef = useRef(false)
 	const hasStarted = simulation.tick > 0 || simulation.mode !== 'paused'
 
 	// Install the `window.__BOT__` replay bridge in non-production builds so
@@ -105,8 +106,32 @@ function Game() {
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [])
 
+	// Toggle the game tick pause with the P key. Pure tick pause: when paused
+	// the ticker skips `advanceFixedSimulation` entirely so no simulation step
+	// runs (not even rewinds/stabilizing). Only active once a run has started
+	// so the menu's `paused` mode stays independent.
+	useEffect(() => {
+		if (!hasStarted) {
+			pausedRef.current = false
+			return
+		}
+
+		function handleKeyDown(event: KeyboardEvent) {
+			if (event.code !== 'KeyP' || event.repeat) {
+				return
+			}
+
+			event.preventDefault()
+			pausedRef.current = !pausedRef.current
+		}
+
+		window.addEventListener('keydown', handleKeyDown)
+		return () => window.removeEventListener('keydown', handleKeyDown)
+	}, [hasStarted])
+
 	function startGame() {
 		accumulatorRef.current = 0
+		pausedRef.current = false
 		setSimulation(createInitialSimulation())
 	}
 
@@ -125,6 +150,7 @@ function Game() {
 						simulation={simulation}
 						accumulatorRef={accumulatorRef}
 						inputRef={inputRef}
+						pausedRef={pausedRef}
 						onSimulationChange={setSimulation}
 					/>
 					<GameScene simulation={simulation} />
@@ -178,6 +204,7 @@ type SimulationTickerProps = {
 	readonly simulation: SimulationState
 	readonly accumulatorRef: React.MutableRefObject<number>
 	readonly inputRef: React.MutableRefObject<SimulationState['input']>
+	readonly pausedRef: React.MutableRefObject<boolean>
 	readonly onSimulationChange: React.Dispatch<
 		React.SetStateAction<SimulationState>
 	>
@@ -186,9 +213,14 @@ type SimulationTickerProps = {
 function SimulationTicker({
 	accumulatorRef,
 	inputRef,
+	pausedRef,
 	onSimulationChange,
 }: SimulationTickerProps) {
 	useFrame((_, delta) => {
+		if (pausedRef.current) {
+			return
+		}
+
 		onSimulationChange((current) => {
 			// When the bot bridge is driving playback, step exactly one
 			// deterministic tick per frame (bypassing the wall-clock
